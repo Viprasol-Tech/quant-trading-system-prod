@@ -1,0 +1,128 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install dependencies - simplified and battle-tested
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    x11vnc \
+    openbox \
+    wget \
+    unzip \
+    curl \
+    git \
+    supervisor \
+    default-jre \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
+    libfontconfig1 \
+    libgtk-3-0 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install websockify for noVNC
+RUN apt-get update && apt-get install -y python3-pip && pip3 install websockify --no-cache-dir && rm -rf /var/lib/apt/lists/*
+
+# Download IB Gateway
+RUN mkdir -p /home/ibgateway && cd /home/ibgateway && \
+    wget -q https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-linux-x64.sh && \
+    chmod +x ibgateway-stable-standalone-linux-x64.sh && \
+    yes "" | ./ibgateway-stable-standalone-linux-x64.sh -q -dir /home/ibgateway/Jts && \
+    rm ibgateway-stable-standalone-linux-x64.sh
+
+# Download and install IBC
+RUN mkdir -p /opt/ibc && cd /tmp && \
+    wget -q https://github.com/IbcAlpha/IBC/releases/download/3.22.0/IBCLinux-3.22.0.zip && \
+    unzip -q IBCLinux-3.22.0.zip -d /opt/ibc && \
+    chmod +x /opt/ibc/*.sh /opt/ibc/scripts/*.sh && \
+    rm IBCLinux-3.22.0.zip
+
+# Install noVNC
+RUN cd /opt && \
+    wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz && \
+    tar xzf v1.5.0.tar.gz && \
+    mv noVNC-1.5.0 /opt/novnc && \
+    ln -s /opt/novnc/vnc.html /opt/novnc/index.html && \
+    rm v1.5.0.tar.gz
+
+# Create necessary directories
+RUN mkdir -p /opt/ibc/config /home/ibgateway/ibc/logs
+
+# IBC Config
+RUN cat > /opt/ibc/config.ini << 'CONFIG'
+AcceptIncomingConnectionAccount=Yes
+AcceptNonBrokerageAccountWarning=Yes
+AllowBlindTrading=Yes
+BindAddress=0.0.0.0
+CloseChannel=No
+ColorPalletName=Dark
+DataCenter=Default
+DisplayAlerts=No
+DisplayTooltips=No
+ExistingSessionDetectedAction=Restart
+FIXConnectionType=ssl
+FIXPasswordEncryption=Basic
+IbLoginID=alharthy2026
+IbPassword=Nasra_2026
+IbSecure=Yes
+IbUseSSL=Yes
+LaunchTradingWorkstation=Yes
+Locale=en_US
+LogPath=/home/ibgateway/ibc/logs
+PasswordEncryption=Basic
+PasswordEncryptionType=IBKR
+Port=4002
+ReadOnlyApi=No
+ReconnectAttempts=3
+ReconnectDelay=2
+TradeMode=P
+TradingMode=paper
+VerboseLogging=No
+CONFIG
+
+# Startup script - simplified
+RUN cat > /start.sh << 'STARTUP'
+#!/bin/bash
+set -e
+
+echo "Starting IBKR + VNC..."
+
+# Start Xvfb
+echo "Starting X display..."
+Xvfb :0 -screen 0 1024x768x24 -ac &
+export DISPLAY=:0
+sleep 3
+
+# Start window manager
+echo "Starting openbox..."
+openbox &
+sleep 2
+
+# Start x11vnc without password (simpler)
+echo "Starting VNC..."
+x11vnc -display :0 -forever -nopw -rfbport 5900 &
+sleep 2
+
+# Start websockify
+echo "Starting websockify..."
+websockify --web /opt/novnc 6080 localhost:5900 &
+sleep 2
+
+# Start IBC + IB Gateway (without exec so container stays alive)
+echo "Starting IBC..."
+cd /opt/ibc
+./gatewaystart.sh --password=Nasra_2026 &
+IBC_PID=$!
+
+echo "System running. Press Ctrl+C to stop."
+wait
+
+STARTUP
+
+RUN chmod +x /start.sh
+
+EXPOSE 4002 5900 6080
+
+CMD ["/start.sh"]

@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # IB Gateway with IBC Auto-Login + noVNC Browser Access
+  ib-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.ibkr-novnc
+    image: trading-system/ib-gateway:latest
+    container_name: ib-gateway
+    restart: always
+    environment:
+      DISPLAY: :0
+      TZ: UTC
+    ports:
+      - "4002:4002"
+      - "5900:5900"
+      - "6080:6080"
+    volumes:
+      - ib-data:/home/ibgateway/Jts
+      - ib-logs:/home/ibgateway/ibc/logs
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["/bin/bash", "-c", "nc -z localhost 4002 2>/dev/null && echo 'OK' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: trading_db
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Python Trading Service
+  python-service:
+    build:
+      context: ./packages/python-service
+      dockerfile: Dockerfile
+    container_name: python-service
+    restart: always
+    environment:
+      IB_GATEWAY_HOST: ib-gateway
+      IB_GATEWAY_PORT: 4002
+      PORT: 6105
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "6105:6105"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6105/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Fastify Backend
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: backend
+    restart: always
+    environment:
+      NODE_ENV: production
+      SERVER_PORT: 6005
+      PYTHON_SERVICE_URL: http://python-service:6105
+    ports:
+      - "6005:6005"
+    depends_on:
+      - python-service
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6005/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    restart: always
+    environment:
+      REACT_APP_API_URL: http://localhost:6005
+      REACT_APP_WS_URL: ws://localhost:6005
+    ports:
+      - "6205:6205"
+    depends_on:
+      - backend
+    networks:
+      - trading-network
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  ib-data:
+  ib-logs:
