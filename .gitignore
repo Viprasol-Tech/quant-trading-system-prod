@@ -1,0 +1,88 @@
+# Temporary deployment scripts
+deploy*.py
+deploy*.sh
+DEPLOY*.sh
+DEPLOY*.txt
+fix*.py
+fix*.sh
+FIX*.sh
+final*.py
+final*.sh
+check*.py
+restart*.py
+start*.py
+start*.sh
+verify*.py
+upload*.py
+wait*.py
+quick*.py
+complete*.py
+cleanup*.py
+deep*.py
+test_all.py
+
+# Temporary documentation
+DEPLOYMENT*.md
+COMPLETED*.md
+COMPLETE*.md
+DEEP_RESEARCH*.md
+FINAL*.md
+GET_TO_100*.md
+IBKR_GATEWAY*.md
+INTEGRATION*.md
+MUSLIM_XCHANGE*.md
+PHASE_1*.md
+PREMIUM*.md
+READY*.md
+SYSTEM_COMPLETE*.md
+TESTING*.md
+ULTIMATE*.md
+WHAT_IVE*.md
+
+# Temporary configs
+*.ibkr
+ibc_config.ini
+docker-compose*.ibkr.yml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
