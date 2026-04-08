@@ -1,0 +1,36 @@
+{
+  "name": "quant-trading-system",
+  "version": "1.0.0",
+  "description": "Professional Shariah-Compliant Multi-Strategy Quant Swing Trading System",
+  "private": true,
+  "workspaces": [
+    "packages/backend",
+    "packages/frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "test:watch": "npm run test:watch --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "trading",
+    "quantitative",
+    "quant",
+    "algorithmic",
+    "shariah-compliant",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "PROPRIETARY"
+}
