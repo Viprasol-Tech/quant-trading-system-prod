@@ -22,7 +22,7 @@ services:
     networks:
       - trading-network
     healthcheck:
-      test: ["/bin/bash", "-c", "nc -z localhost 4002 2>/dev/null && echo 'OK' || exit 1"]
+      test: ["CMD-SHELL", "nc -z localhost 4002 2>/dev/null && echo 'OK' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
