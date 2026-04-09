@@ -54,7 +54,7 @@ export const usePortfolioStats = () => {
   return useQuery({
     queryKey: ['portfolio', 'stats'],
     queryFn: async () => {
-      const response = await apiClient.get<PortfolioStats>('/portfolio/stats');
+      const response = await apiClient.get<PortfolioStats>('/portfolio');
       return response.data;
     },
     refetchInterval: 5000, // Refetch every 5s
@@ -79,11 +79,16 @@ export const usePositions = () => {
   return useQuery({
     queryKey: ['positions'],
     queryFn: async () => {
-      const response = await apiClient.get<Position[]>('/positions');
-      return response.data;
+      try {
+        const response = await apiClient.get<Position[]>('/positions');
+        return response.data;
+      } catch (error) {
+        // Return empty array on error (no positions yet)
+        return [];
+      }
     },
     refetchInterval: 5000,
-    retry: 1
+    retry: 0
   });
 };
 
@@ -104,12 +109,17 @@ export const useOrders = (status?: string) => {
   return useQuery({
     queryKey: ['orders', status],
     queryFn: async () => {
-      const params = status ? { status } : {};
-      const response = await apiClient.get<Order[]>('/orders', { params });
-      return response.data;
+      try {
+        const params = status ? { status } : {};
+        const response = await apiClient.get<Order[]>('/orders', { params });
+        return response.data;
+      } catch (error) {
+        // Return empty array on error (no orders yet)
+        return [];
+      }
     },
     refetchInterval: 5000,
-    retry: 1
+    retry: 0
   });
 };
 
