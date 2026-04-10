@@ -1,9 +1,12 @@
-FROM nginx:stable-alpine
+FROM alpine:latest
+
+RUN apk add --no-cache nginx
 
 WORKDIR /app
 COPY dist /usr/share/nginx/html
 
-RUN cat > /etc/nginx/nginx.conf << 'CONF'
+RUN mkdir -p /etc/nginx/conf.d && \
+    cat > /etc/nginx/nginx.conf << 'CONF'
 user nginx;
 worker_processes auto;
 daemon off;
@@ -23,7 +26,7 @@ http {
   types_hash_max_size 2048;
 
   server {
-    listen 6205 default_server;
+    listen 6205;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -43,13 +46,11 @@ http {
       proxy_http_version 1.1;
       proxy_set_header Upgrade $http_upgrade;
       proxy_set_header Connection "upgrade";
-      proxy_read_timeout 86400s;
+      proxy_read_timeout 86400;
     }
   }
 }
 CONF
 
 EXPOSE 6205
-
-ENTRYPOINT []
 CMD ["/usr/sbin/nginx"]
