@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { initWebSocket, destroyWebSocket } from './api/wsClient';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Positions from './pages/Positions';
@@ -21,6 +22,11 @@ const queryClient = new QueryClient({
 });
 
 const App: React.FC = () => {
+  useEffect(() => {
+    initWebSocket();
+    return () => destroyWebSocket();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <Router>

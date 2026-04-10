@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import apiClient from './client';
+import { useTradingStore } from '../store/tradingStore';
 
 // Types
 export interface PortfolioStats {
@@ -49,90 +50,74 @@ export interface MarketData {
   vw?: number;
 }
 
-// Portfolio hooks
+// Portfolio hooks - now using Zustand store instead of polling
 export const usePortfolioStats = () => {
-  return useQuery({
-    queryKey: ['portfolio', 'stats'],
-    queryFn: async () => {
-      const response = await apiClient.get<PortfolioStats>('/portfolio');
-      return response.data;
-    },
-    refetchInterval: 5000, // Refetch every 5s
-    retry: 1
-  });
+  const portfolio = useTradingStore((state) => state.portfolio);
+
+  return {
+    data: portfolio ? {
+      accountValue: portfolio.totalEquity,
+      cash: portfolio.cash,
+      buyingPower: portfolio.buyingPower,
+      tradingExponent: '0',
+      multiplier: '1',
+      portfolio_value: portfolio.totalEquity,
+      dayTradeCount: 0,
+    } : undefined,
+    isLoading: false,
+  };
 };
 
 export const usePortfolio = () => {
-  return useQuery({
-    queryKey: ['portfolio'],
-    queryFn: async () => {
-      const response = await apiClient.get('/portfolio');
-      return response.data;
-    },
-    refetchInterval: 5000,
-    retry: 1
-  });
+  const portfolio = useTradingStore((state) => state.portfolio);
+
+  return {
+    data: portfolio,
+    isLoading: false,
+  };
 };
 
-// Positions hooks
+// Positions hooks - now using Zustand store
 export const usePositions = () => {
-  return useQuery({
-    queryKey: ['positions'],
-    queryFn: async () => {
-      try {
-        const response = await apiClient.get<Position[]>('/positions');
-        return response.data;
-      } catch (error) {
-        // Return empty array on error (no positions yet)
-        return [];
-      }
-    },
-    refetchInterval: 5000,
-    retry: 0
-  });
+  const positions = useTradingStore((state) => state.positions);
+
+  return {
+    data: positions,
+    isLoading: false,
+  };
 };
 
 export const usePosition = (symbol: string) => {
-  return useQuery({
-    queryKey: ['positions', symbol],
-    queryFn: async () => {
-      const response = await apiClient.get<Position>(`/positions/${symbol}`);
-      return response.data;
-    },
-    refetchInterval: 5000,
-    retry: 1
-  });
+  const positions = useTradingStore((state) => state.positions);
+  const position = positions.find((p) => p.symbol === symbol);
+
+  return {
+    data: position,
+    isLoading: false,
+  };
 };
 
-// Orders hooks
+// Orders hooks - now using Zustand store
 export const useOrders = (status?: string) => {
-  return useQuery({
-    queryKey: ['orders', status],
-    queryFn: async () => {
-      try {
-        const params = status ? { status } : {};
-        const response = await apiClient.get<Order[]>('/orders', { params });
-        return response.data;
-      } catch (error) {
-        // Return empty array on error (no orders yet)
-        return [];
-      }
-    },
-    refetchInterval: 5000,
-    retry: 0
-  });
+  const orders = useTradingStore((state) => state.orders);
+  const filteredOrders = status
+    ? orders.filter((o) => o.status.toLowerCase() === status.toLowerCase())
+    : orders;
+
+  return {
+    data: filteredOrders,
+    isLoading: false,
+  };
 };
 
 export const useOrder = (orderId: string) => {
-  return useQuery({
-    queryKey: ['orders', orderId],
-    queryFn: async () => {
-      const response = await apiClient.get<Order>(`/orders/${orderId}`);
-      return response.data;
-    },
-    refetchInterval: 5000,
-    retry: 1
-  });
+  const orders = useTradingStore((state) => state.orders);
+  const order = orders.find((o) => o.id === orderId);
+
+  return {
+    data: order,
+    isLoading: false,
+  };
 };
 
 // Market data hooks

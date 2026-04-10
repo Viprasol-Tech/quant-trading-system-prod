@@ -1,11 +1,8 @@
 version: '3.8'
 
 services:
-  # IB Gateway with IBC Auto-Login + noVNC Browser Access
+  # IB Gateway - Pre-built image only
   ib-gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.ibkr-novnc
     image: trading-system/ib-gateway:latest
     container_name: ib-gateway
     restart: always
@@ -50,11 +47,9 @@ services:
       retries: 5
       start_period: 30s
 
-  # Python Trading Service
+  # Python Trading Service - Pre-built image only
   python-service:
-    build:
-      context: ./packages/python-service
-      dockerfile: Dockerfile
+    image: trading_system-python-service:latest
     container_name: python-service
     restart: always
     environment:
@@ -78,11 +73,9 @@ services:
       retries: 3
       start_period: 60s
 
-  # Fastify Backend
+  # Fastify Backend - Pre-built image only
   backend:
-    build:
-      context: ./packages/backend
-      dockerfile: Dockerfile
+    image: trading_system-backend:latest
     container_name: backend
     restart: always
     env_file: .env
@@ -103,11 +96,9 @@ services:
       retries: 3
       start_period: 30s
 
-  # React Frontend
+  # React Frontend - Pre-built image only
   frontend:
-    build:
-      context: ./packages/frontend
-      dockerfile: Dockerfile
+    image: trading_system-frontend:latest
     container_name: frontend
     restart: always
     environment:

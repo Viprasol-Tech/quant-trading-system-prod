@@ -8,6 +8,7 @@ import { signalsRoutes } from './signals';
 import { strategiesRoutes } from './strategies';
 import { riskRoutes } from './risk';
 import { setupComplianceRoutes } from './compliance';
+import { wsRoutes } from './ws';
 
 export async function setupRoutes(app: FastifyInstance) {
   logger.info('Setting up API routes...');
@@ -39,6 +40,10 @@ export async function setupRoutes(app: FastifyInstance) {
     // Register Shariah Compliance routes (Muslim Xchange)
     await setupComplianceRoutes(app);
     logger.info('✓ Shariah Compliance routes registered');
+
+    // Register WebSocket routes
+    await app.register(wsRoutes);
+    logger.info('✓ WebSocket routes registered');
 
     logger.info('All routes registered successfully');
   } catch (error) {

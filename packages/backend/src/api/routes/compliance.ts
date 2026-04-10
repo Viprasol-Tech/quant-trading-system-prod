@@ -10,8 +10,42 @@ export async function setupComplianceRoutes(app: FastifyInstance) {
   const mxClient = new MuslimXchangeClient(muslimXchangeUsername, muslimXchangePassword);
 
   /**
+   * GET /api/compliance/screen
+   * Screen a stock for Shariah compliance (supports both query and path params)
+   */
+  app.get<{ Querystring: { symbol?: string }; Params: { symbol?: string } }>(
+    '/api/compliance/screen',
+    async (request: FastifyRequest<{ Querystring: { symbol?: string } }>, reply: FastifyReply) => {
+      try {
+        const symbol = (request.query as any).symbol;
+        if (!symbol) {
+          return reply.status(400).send({
+            success: false,
+            error: 'symbol query parameter required'
+          });
+        }
+
+        logger.info(`Screening ${symbol} for Shariah compliance`);
+        const complianceData = await mxClient.screenTicker(symbol);
+
+        reply.send({
+          success: true,
+          data: complianceData,
+          score: mxClient.getComplianceScore(complianceData)
+        });
+      } catch (error) {
+        logger.error('Error screening stock:', error);
+        reply.status(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to screen stock'
+        });
+      }
+    }
+  );
+
+  /**
    * GET /api/compliance/screen/:symbol
-   * Screen a single stock for Shariah compliance
+   * Screen a single stock for Shariah compliance (path parameter version)
    */
   app.get<{ Params: { symbol: string } }>(
     '/api/compliance/screen/:symbol',

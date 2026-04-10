@@ -1,120 +1,208 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import Decimal from 'decimal.js';
 import { logger } from '../../config/logger';
-import IBKRClient from '../../broker/IBKRClient';
-import { Portfolio } from '../../types';
+import { pythonService } from '../../services/PythonServiceClient';
+import RiskManager from '../../services/RiskManager';
 
 export async function portfolioRoutes(app: FastifyInstance) {
-  const broker = IBKRClient;
 
   /**
-   * GET /api/portfolio - Get portfolio overview
+   * GET /api/portfolio - Get portfolio overview - REAL DATA
    */
-  app.get<{ Reply: { success: boolean; data?: Portfolio; error?: string } }>(
-    '/api/portfolio',
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        logger.info('Fetching portfolio data');
+  app.get('/api/portfolio', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      logger.info('Fetching portfolio data');
 
-        let account: any;
-        let positions: any[] = [];
-
-        try {
-          account = await broker.getAccount();
-          positions = await broker.getPositions();
-        } catch (ibkrError) {
-          logger.warn('IBKR not connected, using mock data:', ibkrError);
-          // Fallback to mock data
-          account = {
-            equity: 100000,
-            cash: 50000,
-            buying_power: 50000
-          };
-          positions = [];
-        }
-
-        const totalEquity = new Decimal(account.equity);
-        const totalCash = new Decimal(account.cash);
-        const maxRisk = totalEquity.times(new Decimal(0.07)); // 7% max risk
-
-        const portfolio: Portfolio = {
-          totalEquity,
-          totalCash,
-          positions: positions.map((pos) => ({
-            symbol: pos.symbol,
-            quantity: parseInt(pos.qty, 10),
-            entryPrice: new Decimal(pos.avg_entry_price),
-            currentPrice: new Decimal(pos.current_price),
-            pnl: new Decimal(pos.unrealized_gain),
-            pnlPercent: parseFloat(pos.unrealized_gain_pct),
-            stopLoss: new Decimal(0), // Placeholder
-            takeProfit: new Decimal(0), // Placeholder
-            entryTime: new Date(),
-            strategy: 'N/A'
-          })),
-          openPositions: positions.length,
-          openRisk: totalEquity.times(new Decimal(0.03)), // Placeholder
-          maxRisk,
-          riskPercent: 3, // Placeholder
-          drawdown: 0
-        };
-
-        logger.info(`Portfolio fetched: ${portfolio.openPositions} positions`);
-
-        reply.send({
-          success: true,
-          data: portfolio
-        });
-      } catch (error) {
-        logger.error('Portfolio fetch failed:', error);
-        reply.status(500).send({
+      // Check connection
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
         });
       }
-    }
-  );
 
-  /**
-   * GET /api/portfolio/stats - Get portfolio statistics
-   */
-  app.get<{
-    Reply: {
-      success: boolean;
-      data?: {
-        equity: string;
-        cash: string;
-        buyingPower: string;
-        dayTradingBuyingPower: string;
-        multiplier: string;
-        shorting_enabled: boolean;
-        sma: string;
-      };
-      error?: string;
-    };
-  }>('/api/portfolio/stats', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      logger.info('Fetching portfolio stats');
+      // Get REAL data
+      const account = await pythonService.getAccountSummary();
+      const positions = await pythonService.getPositions();
 
-      const account = await broker.getAccount();
+      if (!account) {
+        return reply.status(500).send({
+          success: false,
+          error: {
+            code: 'ACCOUNT_FETCH_FAILED',
+            message: 'Failed to fetch account data'
+          }
+        });
+      }
 
-      reply.send({
+      const totalEquity = new Decimal(account.net_liquidation || '0');
+      const totalCash = new Decimal(account.total_cash || '0');
+      const buyingPower = new Decimal(account.buying_power || '0');
+
+      // Calculate portfolio heat
+      const portfolioHeat = RiskManager.calculatePortfolioHeat(positions);
+      const riskPercent = totalEquity.isZero() 
+        ? 0 
+        : portfolioHeat.dividedBy(totalEquity).times(100).toNumber();
+
+      // Calculate drawdown
+      RiskManager.updateDrawdown(totalEquity);
+      const drawdown = RiskManager.getCurrentDrawdown().toNumber();
+
+      // Calculate total unrealized P&L
+      let totalUnrealizedPnl = new Decimal(0);
+      for (const pos of positions) {
+        totalUnrealizedPnl = totalUnrealizedPnl.plus(pos.unrealized_pl || '0');
+      }
+
+      return reply.send({
         success: true,
+        timestamp: new Date().toISOString(),
         data: {
-          equity: account.equity,
-          cash: account.cash,
-          buyingPower: account.buying_power,
-          dayTradingBuyingPower: account.daytrade_count,
-          multiplier: account.multiplier,
-          shorting_enabled: account.shorting_enabled,
-          accountId: account.account_id
+          account: {
+            accountId: account.account_id,
+            totalEquity: totalEquity.toFixed(2),
+            totalCash: totalCash.toFixed(2),
+            buyingPower: buyingPower.toFixed(2),
+            currency: account.currency || 'USD'
+          },
+          positions: positions.map(pos => ({
+            symbol: pos.symbol,
+            quantity: parseInt(pos.qty, 10),
+            side: pos.side,
+            avgEntryPrice: pos.avg_entry_price,
+            currentPrice: pos.current_price,
+            marketValue: pos.market_value,
+            unrealizedPnl: pos.unrealized_pl,
+            unrealizedPnlPercent: pos.unrealized_plpc
+          })),
+          summary: {
+            openPositions: positions.length,
+            totalUnrealizedPnl: totalUnrealizedPnl.toFixed(2),
+            portfolioHeat: `${riskPercent.toFixed(2)}%`,
+            currentDrawdown: `${drawdown.toFixed(2)}%`,
+            tradingAllowed: !RiskManager.shouldHalt()
+          }
         }
       });
-    } catch (error) {
-      logger.error('Portfolio stats fetch failed:', error);
-      reply.status(500).send({
+    } catch (error: any) {
+      logger.error('Portfolio fetch failed:', error);
+      return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: {
+          code: 'PORTFOLIO_FETCH_FAILED',
+          message: error.message || 'Unknown error'
+        }
+      });
+    }
+  });
+
+  /**
+   * GET /api/portfolio/balance - Get current balance - REAL DATA
+   */
+  app.get('/api/portfolio/balance', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
+        });
+      }
+
+      const account = await pythonService.getAccountSummary();
+      if (!account) {
+        return reply.status(500).send({
+          success: false,
+          error: {
+            code: 'ACCOUNT_FETCH_FAILED',
+            message: 'Failed to fetch account data'
+          }
+        });
+      }
+
+      return reply.send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          netLiquidation: account.net_liquidation,
+          totalCash: account.total_cash,
+          buyingPower: account.buying_power,
+          grossPositionValue: account.gross_position_value,
+          availableFunds: account.available_funds,
+          excessLiquidity: account.excess_liquidity,
+          currency: account.currency
+        }
+      });
+    } catch (error: any) {
+      logger.error('Balance fetch failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'BALANCE_FETCH_FAILED',
+          message: error.message
+        }
+      });
+    }
+  });
+
+  /**
+   * GET /api/portfolio/stats - Get portfolio statistics - REAL DATA
+   */
+  app.get('/api/portfolio/stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const isConnected = await pythonService.isConnected();
+      
+      const account = isConnected ? await pythonService.getAccountSummary() : null;
+      const positions = isConnected ? await pythonService.getPositions() : [];
+
+      // Calculate stats
+      let totalPnl = new Decimal(0);
+      let winCount = 0;
+      let lossCount = 0;
+
+      for (const pos of positions) {
+        const pnl = new Decimal(pos.unrealized_pl || '0');
+        totalPnl = totalPnl.plus(pnl);
+        if (pnl.greaterThan(0)) winCount++;
+        else if (pnl.lessThan(0)) lossCount++;
+      }
+
+      const equity = new Decimal(account?.net_liquidation || '0');
+      RiskManager.updateDrawdown(equity);
+
+      return reply.send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          connected: isConnected,
+          equity: account?.net_liquidation || '0',
+          cash: account?.total_cash || '0',
+          buyingPower: account?.buying_power || '0',
+          positionsCount: positions.length,
+          totalPnl: totalPnl.toFixed(2),
+          winningPositions: winCount,
+          losingPositions: lossCount,
+          drawdown: RiskManager.getCurrentDrawdown().toFixed(2),
+          sizeMultiplier: RiskManager.getSizeMultiplier().toFixed(2),
+          tradingAllowed: !RiskManager.shouldHalt()
+        }
+      });
+    } catch (error: any) {
+      logger.error('Portfolio stats fetch failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'STATS_FETCH_FAILED',
+          message: error.message
+        }
       });
     }
   });

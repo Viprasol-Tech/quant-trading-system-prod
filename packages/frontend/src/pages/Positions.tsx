@@ -40,7 +40,7 @@ export default function Positions() {
                   <tr key={index} className="border-b border-gray-700 hover:bg-gray-700/30">
                     <td className="py-4 px-6 text-white font-semibold">{position.symbol}</td>
                     <td className="text-right py-4 px-6 text-gray-300">{parseInt(position.qty || '0').toLocaleString()}</td>
-                    <td className="text-right py-4 px-6 text-gray-300">${position.cost_basis || 'N/A'}</td>
+                    <td className="text-right py-4 px-6 text-gray-300">${position.avg_entry_price || 'N/A'}</td>
                     <td className="text-right py-4 px-6 text-gray-300">
                       ${parseFloat(position.market_value || '0').toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>

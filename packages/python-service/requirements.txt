@@ -2,3 +2,4 @@ ib-insync==0.9.86
 flask==2.3.0
 flask-cors==4.0.0
 werkzeug==2.3.0
+requests==2.31.0

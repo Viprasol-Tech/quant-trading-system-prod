@@ -37,7 +37,7 @@ export class Strategy3Hybrid {
       volatilityScore * 0.10;
 
     // Check if regime is bear (disqualifying)
-    if (analysis.regime.classification === 'bear') {
+    if (analysis.regime?.classification === 'bear') {
       return null;
     }
 
@@ -46,32 +46,46 @@ export class Strategy3Hybrid {
       return null;
     }
 
+    // Calculate REAL stop loss based on ATR
+    const atr = analysis.volatility?.atr || currentPrice * 0.02;
+    const atrMultiplier = 2.5;
+    const stopLossPrice = currentPrice - (atr * atrMultiplier);
+    
+    // Apply 5% max stop loss cap
+    const maxStopLoss = currentPrice * 0.95;
+    const finalStopLoss = Math.max(stopLossPrice, maxStopLoss);
+
+    // Calculate REAL take profit (2:1 R:R ratio)
+    const riskPerShare = currentPrice - finalStopLoss;
+    const takeProfit2 = currentPrice + (riskPerShare * 2.0);
+
     // All conditions met
     return {
       symbol,
       direction: 'long',
       entryPrice: new Decimal(currentPrice),
-      stopLoss: new Decimal(0), // Placeholder
-      takeProfit: new Decimal(0), // Placeholder
-      riskAmount: new Decimal(0), // Placeholder
-      riskPercent: 1,
+      stopLoss: new Decimal(finalStopLoss),
+      takeProfit: new Decimal(takeProfit2),
+      riskAmount: new Decimal(riskPerShare * 100),
+      riskPercent: ((currentPrice - finalStopLoss) / currentPrice) * 100,
       confidence: Math.round(compositeScore),
       rating: this.scoreToRating(compositeScore),
       strategy: this.name,
       timeframe: 'daily',
       timestamp: new Date(),
-      reasoning: `Hybrid composite: Trend ${trendScore.toFixed(0)}, Momentum ${momentumScore.toFixed(0)}, Volume ${volumeScore.toFixed(0)}, Pattern ${patternScore.toFixed(0)}, Regime ${regimeScore.toFixed(0)}, Vol ${volatilityScore.toFixed(0)}`
+      reasoning: `Hybrid composite score ${compositeScore.toFixed(0)}: Trend ${trendScore.toFixed(0)}, Momentum ${momentumScore.toFixed(0)}, Volume ${volumeScore.toFixed(0)}, Pattern ${patternScore.toFixed(0)}, Regime ${regimeScore.toFixed(0)}, Volatility ${volatilityScore.toFixed(0)}`
     };
   }
 
   private calculateTrendScore(analysis: any): number {
     let score = 0;
 
-    if (analysis.trend.ma_alignment === 'bullish') score += 40;
-    else if (analysis.trend.ma_alignment === 'mixed') score += 20;
+    if (analysis.trend?.ma_alignment === 'bullish') score += 40;
+    else if (analysis.trend?.ma_alignment === 'mixed') score += 20;
 
-    if (analysis.trend.ma_50_slope > 0) score += 20;
-    if (analysis.trend.ma_100_slope > 0) score += 20;
+    if ((analysis.trend?.ma_50_slope || 0) > 0) score += 20;
+    if ((analysis.trend?.ma_100_slope || 0) > 0) score += 20;
+    if ((analysis.trend?.ma_200_slope || 0) > 0) score += 20;
 
     return Math.min(100, score);
   }
@@ -79,13 +93,19 @@ export class Strategy3Hybrid {
   private calculateMomentumScore(analysis: any): number {
     let score = 0;
 
-    // RSI component (0-50)
-    if (analysis.momentum.rsi >= 40 && analysis.momentum.rsi <= 70) score += 40;
-    else if (analysis.momentum.rsi >= 30 && analysis.momentum.rsi < 40) score += 20;
+    // RSI scoring
+    const rsi = analysis.momentum?.rsi || 50;
+    if (rsi >= 50 && rsi <= 70) score += 40;
+    else if (rsi >= 40 && rsi < 50) score += 25;
+    else if (rsi > 70) score += 10; // Overbought, lower score
 
-    // MACD component (0-50)
-    if (analysis.momentum.macd > analysis.momentum.macd_signal) score += 30;
-    if (analysis.momentum.macd_histogram > 0) score += 20;
+    // MACD scoring
+    const macd = analysis.momentum?.macd || 0;
+    const macdSignal = analysis.momentum?.macd_signal || 0;
+    const macdHistogram = analysis.momentum?.macd_histogram || 0;
+
+    if (macd > macdSignal) score += 30; // Bullish crossover
+    if (macdHistogram > 0) score += 30; // Positive histogram
 
     return Math.min(100, score);
   }
@@ -93,55 +113,73 @@ export class Strategy3Hybrid {
   private calculateVolumeScore(analysis: any): number {
     let score = 0;
 
-    // RVOL component (0-50)
-    if (analysis.volume.rvol > 1.5) score += 50;
-    else if (analysis.volume.rvol > 1.0) score += 30;
-    else if (analysis.volume.rvol > 0.8) score += 15;
+    // RVOL scoring
+    const rvol = analysis.volume?.rvol || 1;
+    if (rvol > 2) score += 50;
+    else if (rvol > 1.5) score += 40;
+    else if (rvol > 1) score += 25;
 
-    // OBV component (0-50)
-    if (analysis.volume.obv_trend > 0) score += 50;
+    // OBV direction
+    if ((analysis.volume?.obv_trend || 0) > 0) score += 30;
 
-    return Math.min(100, (score / 2)); // Scale to 0-100
+    // Money flow
+    if ((analysis.volume?.mfi || 50) > 50) score += 20;
+
+    return Math.min(100, score);
   }
 
   private calculatePatternScore(analysis: any): number {
-    // If patterns detected, award points
-    // In this simplified version, use support/resistance proximity
-    let score = 50; // Base
+    let score = 0;
 
-    const nearSupport = analysis.support_resistance.levels.some((level: any) =>
-      level.type === 'support' &&
-      Math.abs(level.price - analysis.price) / analysis.price < 0.02
+    // Check for bullish patterns
+    const patterns = analysis.patterns || {};
+    
+    if (patterns.bullish_engulfing) score += 30;
+    if (patterns.hammer) score += 25;
+    if (patterns.morning_star) score += 30;
+    if (patterns.three_white_soldiers) score += 35;
+    if (patterns.double_bottom) score += 40;
+    if (patterns.ascending_triangle) score += 35;
+
+    // Near support adds to pattern score
+    const nearSupport = analysis.support_resistance?.levels?.some((l: any) =>
+      l.type === 'support' && 
+      (analysis.currentPrice || 0) >= l.price * 0.98 &&
+      (analysis.currentPrice || 0) <= l.price * 1.02
     );
-
-    if (nearSupport) score += 25;
+    if (nearSupport) score += 20;
 
     return Math.min(100, score);
   }
 
   private calculateRegimeScore(analysis: any): number {
-    if (analysis.regime.classification === 'bull') return 80;
-    if (analysis.regime.classification === 'range') return 40;
-    if (analysis.regime.classification === 'bear') return 0;
-    return 50;
+    const regime = analysis.regime?.classification || 'unknown';
+
+    switch (regime) {
+      case 'bull': return 100;
+      case 'recovering': return 75;
+      case 'range': return 50;
+      case 'bear': return 0;
+      default: return 25;
+    }
   }
 
   private calculateVolatilityScore(analysis: any): number {
-    // Avoid extreme high volatility
-    const atrPercent = (analysis.volatility.atr / analysis.price) * 100;
+    // Lower volatility = higher score (more predictable)
+    const atrPercent = analysis.volatility?.atr_percent || 2;
 
-    if (atrPercent < 2) return 100; // Low vol - optimal
-    if (atrPercent < 3) return 80;
-    if (atrPercent < 5) return 60;
-    if (atrPercent < 8) return 30;
-    return 10; // Extreme vol - avoid
+    if (atrPercent < 1.5) return 100;
+    if (atrPercent < 2.5) return 80;
+    if (atrPercent < 3.5) return 60;
+    if (atrPercent < 5) return 40;
+    return 20; // High volatility
   }
 
   private scoreToRating(score: number): string {
     if (score >= 80) return 'Strong Buy';
-    if (score >= 60) return 'Buy';
-    if (score >= 40) return 'Neutral';
-    if (score >= 20) return 'Sell';
+    if (score >= 65) return 'Buy';
+    if (score >= 50) return 'Neutral';
+    if (score >= 35) return 'Sell';
     return 'Strong Sell';
   }
 }

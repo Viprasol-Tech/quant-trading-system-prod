@@ -1,120 +1,195 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import Decimal from 'decimal.js';
 import { logger } from '../../config/logger';
-import IBKRClient, { IBKRPosition } from '../../broker/IBKRClient';
-import { Position } from '../../types';
+import { pythonService } from '../../services/PythonServiceClient';
 
 export async function positionsRoutes(app: FastifyInstance) {
-  const broker = IBKRClient;
 
   /**
-   * GET /api/positions - Get all open positions
+   * GET /api/positions - Get all positions - REAL DATA from IBKR
    */
-  app.get<{ Reply: { success: boolean; data?: Position[]; error?: string } }>(
-    '/api/positions',
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        logger.info('Fetching all positions');
-
-        const ibkrPositions = await broker.getPositions();
-
-        const positions: Position[] = ibkrPositions.map((pos: IBKRPosition) => ({
-          symbol: pos.symbol,
-          quantity: parseInt(pos.qty, 10),
-          entryPrice: new Decimal(pos.avg_entry_price),
-          currentPrice: new Decimal(pos.current_price),
-          pnl: new Decimal(pos.unrealized_gain),
-          pnlPercent: parseFloat(pos.unrealized_gain_pct),
-          stopLoss: new Decimal(0), // Placeholder
-          takeProfit: new Decimal(0), // Placeholder
-          entryTime: new Date(), // Placeholder
-          strategy: 'Unknown'
-        }));
-
-        logger.info(`Retrieved ${positions.length} positions`);
-
-        reply.send({
-          success: true,
-          data: positions
-        });
-      } catch (error) {
-        logger.error('Positions fetch failed:', error);
-        reply.status(500).send({
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
-    }
-  );
-
-  /**
-   * GET /api/positions/:symbol - Get specific position
-   */
-  app.get<{
-    Params: { symbol: string };
-    Reply: { success: boolean; data?: Position; error?: string };
-  }>('/api/positions/:symbol', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/positions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { symbol } = request.params as { symbol: string };
-      logger.info(`Fetching position for ${symbol}`);
+      logger.info('Fetching positions');
 
-      const pos = await broker.getPosition(symbol);
-
-      if (!pos) {
-        return reply.status(404).send({
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
           success: false,
-          error: `Position not found for ${symbol}`
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
         });
       }
 
-      const position: Position = {
-        symbol: pos.symbol,
-        quantity: parseInt(pos.qty, 10),
-        entryPrice: new Decimal(pos.avg_entry_price),
-        currentPrice: new Decimal(pos.current_price),
-        pnl: new Decimal(pos.unrealized_gain),
-        pnlPercent: parseFloat(pos.unrealized_gain_pct),
-        stopLoss: new Decimal(0),
-        takeProfit: new Decimal(0),
-        entryTime: new Date(),
-        strategy: 'Unknown'
-      };
+      const positions = await pythonService.getPositions();
 
-      reply.send({
+      return reply.send({
         success: true,
-        data: position
+        timestamp: new Date().toISOString(),
+        data: {
+          positions: positions.map(pos => ({
+            symbol: pos.symbol,
+            qty: pos.qty,
+            side: pos.side,
+            avgEntryPrice: pos.avg_entry_price,
+            currentPrice: pos.current_price,
+            marketValue: pos.market_value,
+            unrealizedPl: pos.unrealized_pl,
+            unrealizedPlpc: pos.unrealized_plpc
+          })),
+          count: positions.length
+        }
       });
-    } catch (error) {
-      logger.error(`Position fetch failed:`, error);
-      reply.status(500).send({
+    } catch (error: any) {
+      logger.error('Positions fetch failed:', error);
+      return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: {
+          code: 'POSITIONS_FETCH_FAILED',
+          message: error.message
+        }
       });
     }
   });
 
   /**
-   * DELETE /api/positions/:symbol - Close position
+   * GET /api/positions/:symbol - Get position for specific symbol - REAL DATA
    */
-  app.delete<{
-    Params: { symbol: string };
-    Reply: { success: boolean; message?: string; error?: string };
-  }>('/api/positions/:symbol', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/positions/:symbol', async (request: FastifyRequest<{
+    Params: { symbol: string }
+  }>, reply: FastifyReply) => {
     try {
-      const { symbol } = request.params as { symbol: string };
-      logger.info(`Closing position for ${symbol}`);
+      const { symbol } = request.params;
+      const upperSymbol = symbol.toUpperCase();
 
-      await broker.closePosition(symbol);
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
+        });
+      }
 
-      reply.send({
+      const positions = await pythonService.getPositions();
+      const position = positions.find(p => p.symbol.toUpperCase() === upperSymbol);
+
+      if (!position) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'POSITION_NOT_FOUND',
+            message: `No position found for ${upperSymbol}`
+          }
+        });
+      }
+
+      return reply.send({
         success: true,
-        message: `Position for ${symbol} closed`
+        timestamp: new Date().toISOString(),
+        data: {
+          symbol: position.symbol,
+          qty: position.qty,
+          side: position.side,
+          avgEntryPrice: position.avg_entry_price,
+          currentPrice: position.current_price,
+          marketValue: position.market_value,
+          unrealizedPl: position.unrealized_pl,
+          unrealizedPlpc: position.unrealized_plpc
+        }
       });
-    } catch (error) {
-      logger.error(`Position close failed:`, error);
-      reply.status(500).send({
+    } catch (error: any) {
+      logger.error('Position fetch failed:', error);
+      return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: {
+          code: 'POSITION_FETCH_FAILED',
+          message: error.message
+        }
+      });
+    }
+  });
+
+  /**
+   * POST /api/positions/:symbol/close - Close a position - REAL ORDER to IBKR
+   */
+  app.post('/api/positions/:symbol/close', async (request: FastifyRequest<{
+    Params: { symbol: string },
+    Body: { quantity?: number }
+  }>, reply: FastifyReply) => {
+    try {
+      const { symbol } = request.params;
+      const { quantity } = request.body || {};
+      const upperSymbol = symbol.toUpperCase();
+
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
+        });
+      }
+
+      // Get current position
+      const positions = await pythonService.getPositions();
+      const position = positions.find(p => p.symbol.toUpperCase() === upperSymbol);
+
+      if (!position) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'POSITION_NOT_FOUND',
+            message: `No position found for ${upperSymbol}`
+          }
+        });
+      }
+
+      const posQty = parseInt(position.qty, 10);
+      const closeQty = quantity || Math.abs(posQty);
+
+      // Submit closing order (opposite side)
+      const order = await pythonService.submitOrder({
+        symbol: upperSymbol,
+        quantity: closeQty,
+        order_type: 'MKT'
+      });
+
+      if (!order) {
+        return reply.status(500).send({
+          success: false,
+          error: {
+            code: 'CLOSE_ORDER_FAILED',
+            message: 'Failed to submit closing order'
+          }
+        });
+      }
+
+      return reply.send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          orderId: order.order_id,
+          symbol: upperSymbol,
+          action: 'CLOSE',
+          quantity: closeQty,
+          status: order.status,
+          message: 'Position close order submitted'
+        }
+      });
+    } catch (error: any) {
+      logger.error('Position close failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'CLOSE_FAILED',
+          message: error.message
+        }
       });
     }
   });

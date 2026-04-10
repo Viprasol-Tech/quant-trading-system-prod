@@ -2,75 +2,110 @@ import { TradeSignal } from '../types';
 import Decimal from 'decimal.js';
 
 /**
- * Strategy 2: Pullback/Mean Reversion in Uptrend
+ * Strategy 2: Pullback/Mean Reversion
  *
  * Entry conditions (ALL must be true):
- * 1. Daily MA alignment bullish (confirmed uptrend)
- * 2. Price pulls back to support zone (Fib 38-62%, MA support, or prior S/R)
- * 3. RSI dipped below 50, now turning up
- * 4. Volume declining on pullback (seller fatigue)
- * 5. Bullish price action at support
+ * 1. Overall trend is bullish (50 MA > 200 MA)
+ * 2. Price pulls back to support (38.2% or 50% Fib level)
+ * 3. RSI shows oversold bounce (35-45 range, rising)
+ * 4. Volume declining on pullback (dry-up)
+ * 5. MACD showing early reversal signs
+ * 6. Market regime = 'bull' or 'recovering'
  */
 export class Strategy2PullbackReversion {
   name = 'Pullback/Mean Reversion';
   shortName = 'S2';
 
   generateSignal(symbol: string, analysis: any, currentPrice: number): TradeSignal | null {
-    // 1. Check MA alignment - must be bullish uptrend
-    const maBullish = analysis.trend.ma_alignment === 'bullish' &&
-      analysis.trend.ma_50_slope > 0;
+    // 1. Check overall trend is bullish
+    const trendBullish = analysis.trend?.ma_alignment === 'bullish' ||
+      (analysis.trend?.ma_50 > analysis.trend?.ma_200);
 
-    if (!maBullish) return null;
+    if (!trendBullish) return null;
 
-    // 2. Check if price is near support
-    const nearSupport = analysis.support_resistance.levels.some((level: any) =>
-      level.type === 'support' &&
-      currentPrice >= level.price * 0.98 && // Within 2% of support
+    // 2. Check if price is near Fibonacci support
+    const fibLevels = analysis.fibonacci?.retracement_levels || {};
+    const fib382 = fibLevels['38.2%'] || currentPrice * 0.962;
+    const fib50 = fibLevels['50%'] || currentPrice * 0.95;
+    
+    const nearFibSupport = 
+      (currentPrice >= fib382 * 0.98 && currentPrice <= fib382 * 1.02) ||
+      (currentPrice >= fib50 * 0.98 && currentPrice <= fib50 * 1.02);
+
+    // Also check S/R support
+    const supportLevels = analysis.support_resistance?.levels?.filter((l: any) => l.type === 'support') || [];
+    const nearSupport = supportLevels.some((level: any) =>
+      currentPrice >= level.price * 0.98 &&
       currentPrice <= level.price * 1.02
     );
 
-    if (!nearSupport) return null;
+    if (!nearFibSupport && !nearSupport) return null;
 
-    // 3. Check RSI - must be below 50 but turning up
-    // We check if RSI is in lower range (retracement) but positive momentum
-    const rsiInRetracement = analysis.momentum.rsi < 50;
-    const rsiTurningUp = analysis.momentum.rsi > 35; // Recovering from oversold
+    // 3. Check RSI - oversold bounce
+    const rsi = analysis.momentum?.rsi || 50;
+    const rsiOversoldBounce = rsi >= 35 && rsi <= 50;
+    if (!rsiOversoldBounce) return null;
 
-    if (!rsiInRetracement || !rsiTurningUp) return null;
+    // 4. Check volume - declining on pullback (RVOL < 1)
+    const volumeDeclining = (analysis.volume?.rvol || 1) < 1.2;
+    if (!volumeDeclining) return null;
 
-    // 4. Check volume - declining (seller fatigue)
-    // RVOL < 1.0 indicates lower volume during pullback
-    const volumeDecline = analysis.volume.rvol < 1.0;
-    if (!volumeDecline) return null;
+    // 5. Check MACD - early reversal (histogram turning up from negative)
+    const macdHistogram = analysis.momentum?.macd_histogram || 0;
+    const macdReversal = macdHistogram > -0.5 && macdHistogram < 0.5;
 
-    // 5. Check OBV - should still be in uptrend (not breaking down)
-    const obvUptrend = analysis.volume.obv_trend > 0;
-    if (!obvUptrend) return null;
+    // 6. Check regime
+    const regime = analysis.regime?.classification;
+    if (regime !== 'bull' && regime !== 'recovering') return null;
 
-    // All conditions met - generate signal
+    // Calculate REAL stop loss based on ATR and support
+    const atr = analysis.volatility?.atr || currentPrice * 0.02;
+    const atrMultiplier = 2.0; // Tighter stop for mean reversion
+    
+    // Use support level as reference if available
+    const nearestSupport = supportLevels.length > 0 
+      ? Math.max(...supportLevels.map((l: any) => l.price).filter((p: number) => p < currentPrice))
+      : currentPrice - (atr * atrMultiplier);
+    
+    const stopLossPrice = Math.min(
+      nearestSupport * 0.99, // Just below support
+      currentPrice - (atr * atrMultiplier)
+    );
+    
+    // Apply 5% max stop loss cap
+    const maxStopLoss = currentPrice * 0.95;
+    const finalStopLoss = Math.max(stopLossPrice, maxStopLoss);
+
+    // Calculate REAL take profit
+    const riskPerShare = currentPrice - finalStopLoss;
+    const takeProfit1 = currentPrice + (riskPerShare * 1.5);
+    const takeProfit2 = currentPrice + (riskPerShare * 2.0);
+
+    // Calculate confidence
     const confidence = Math.min(
       100,
-      50 + // Base confidence
-      (maBullish ? 10 : 0) +
-      (rsiTurningUp ? 10 : 0) +
-      (volumeDecline ? 10 : 0) +
-      (obvUptrend ? 10 : 0)
+      45 +
+      (nearFibSupport ? 15 : 0) +
+      (nearSupport ? 10 : 0) +
+      (rsiOversoldBounce ? 10 : 0) +
+      (volumeDeclining ? 10 : 0) +
+      (macdReversal ? 10 : 0)
     );
 
     return {
       symbol,
       direction: 'long',
       entryPrice: new Decimal(currentPrice),
-      stopLoss: new Decimal(0), // Placeholder
-      takeProfit: new Decimal(0), // Placeholder
-      riskAmount: new Decimal(0), // Placeholder
-      riskPercent: 1,
+      stopLoss: new Decimal(finalStopLoss),
+      takeProfit: new Decimal(takeProfit2),
+      riskAmount: new Decimal(riskPerShare * 100),
+      riskPercent: ((currentPrice - finalStopLoss) / currentPrice) * 100,
       confidence: Math.round(confidence),
       rating: this.scoreToRating(confidence),
       strategy: this.name,
       timeframe: 'daily',
       timestamp: new Date(),
-      reasoning: `Pullback reversion: Uptrend ${analysis.trend.ma_alignment}, support zone, RSI ${analysis.momentum.rsi.toFixed(1)} recovering, low volume pullback`
+      reasoning: `Mean reversion at support: RSI ${rsi.toFixed(1)} bouncing, RVOL ${(analysis.volume?.rvol || 0).toFixed(2)}x (low volume pullback), stop at $${finalStopLoss.toFixed(2)}`
     };
   }
 

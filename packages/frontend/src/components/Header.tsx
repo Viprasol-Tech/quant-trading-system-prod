@@ -1,14 +1,21 @@
 import React from 'react';
 import { usePortfolioStats } from '../api/hooks';
+import { useTradingStore } from '../store/tradingStore';
 
 export default function Header() {
   const { data: stats, isLoading } = usePortfolioStats();
+  const wsStatus = useTradingStore((state) => state.wsStatus);
+
+  const statusColor = wsStatus === 'connected' ? 'bg-green-400' : wsStatus === 'connecting' ? 'bg-amber-400' : 'bg-red-400';
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 border-b border-primary-600/20 px-8 py-6 flex items-center justify-between backdrop-blur-sm">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Trading Dashboard</h2>
-        <p className="text-sm text-primary-400/70 mt-1">Real-time monitoring & control</p>
+      <div className="flex items-center gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Trading Dashboard</h2>
+          <p className="text-sm text-primary-400/70 mt-1">Real-time monitoring & control</p>
+        </div>
+        <div className={`w-2 h-2 rounded-full ${statusColor}`} title={`WebSocket: ${wsStatus}`} />
       </div>
 
       <div className="flex gap-12">

@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import Fastify from 'fastify';
+import fastifyWebsocket from '@fastify/websocket';
 import { logger } from './config/logger';
 import { config } from './config/environment';
 import { setupRoutes } from './api/routes';
@@ -51,6 +52,10 @@ process.on('uncaughtException', (error) => {
 // Start server
 const start = async () => {
   try {
+    // Register WebSocket plugin BEFORE setting up routes
+    await app.register(fastifyWebsocket);
+    logger.info('WebSocket plugin registered');
+
     // Setup routes - MUST be awaited
     await setupRoutes(app);
     logger.info('Routes setup completed successfully');

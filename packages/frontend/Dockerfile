@@ -52,10 +52,11 @@ http {
         }
 
         location /ws {
-            proxy_pass ws://backend:6005/ws;
+            proxy_pass http://backend:6005/ws;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+            proxy_read_timeout 86400;
         }
     }
 }

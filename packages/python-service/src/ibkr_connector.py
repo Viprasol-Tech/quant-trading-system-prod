@@ -88,6 +88,27 @@ class IBKRConnector:
         except Exception as e:
             logger.error(f"Initialization error: {e}")
 
+    def register_event_callbacks(self, on_update):
+        """Register callbacks for IBKR events"""
+        try:
+            logger.info("Registering IBKR event callbacks...")
+
+            # Position updates
+            self.ib.positionEvent += lambda pos: on_update('position')
+
+            # Order status updates
+            self.ib.orderStatusEvent += lambda trade: on_update('order')
+
+            # Account value updates
+            self.ib.accountValueEvent += lambda val: on_update('account')
+
+            # Execution updates
+            self.ib.execDetailsEvent += lambda trade, fill: on_update('order')
+
+            logger.info("✅ Event callbacks registered")
+        except Exception as e:
+            logger.error(f"Error registering callbacks: {e}")
+
     async def get_account_summary(self) -> Dict:
         """Get account information from IBKR"""
         if not self.connected:

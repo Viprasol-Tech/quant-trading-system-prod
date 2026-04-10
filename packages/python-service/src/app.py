@@ -3,17 +3,20 @@ Python Service - Flask API for Trading System
 Bridges between Frontend/Backend and IBKR Gateway
 """
 
-from flask import Flask, jsonify, request
-from flask_cors import CORS
 import asyncio
 import logging
 import os
 import sys
+import threading
+import time
 from datetime import datetime
 
-# Add src directory to path for imports
+# Add src directory to path BEFORE imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import requests
 from ibkr_connector import get_connector
 
 # Logging
@@ -56,6 +59,152 @@ def ensure_ibkr_connected():
         loop.run_until_complete(init())
     except Exception as e:
         logger.error(f"Event loop error: {e}")
+
+# ======================
+# WEBSOCKET BACKGROUND THREAD
+# ======================
+
+_debounce_timer = None
+_debounce_lock = threading.Lock()
+BACKEND_WS_UPDATE_URL = os.getenv('BACKEND_URL', 'http://backend:6005') + '/api/ws-update'
+DEBOUNCE_INTERVAL = 0.15  # 150ms debounce
+FALLBACK_INTERVAL = 30  # 30s fallback
+
+def _collect_and_post():
+    """Collect current IBKR data and POST to backend"""
+    try:
+        connector = get_connector()
+        if not connector.connected:
+            logger.debug("IBKR not connected, skipping WS update")
+            return
+
+        # Get current data from ib_insync cache (thread-safe)
+        account_summary = connector.ib.accountSummary()
+        positions = connector.ib.positions()
+        open_orders = connector.ib.openOrders()
+
+        # Build payload
+        portfolio_data = {
+            'totalEquity': '0',
+            'cash': '0',
+            'buyingPower': '0',
+            'dayPnL': '0',
+            'unrealizedPnL': '0'
+        }
+
+        for value in account_summary:
+            if value.tag == 'NetLiquidation':
+                portfolio_data['totalEquity'] = str(value.value)
+            elif value.tag == 'TotalCashValue':
+                portfolio_data['cash'] = str(value.value)
+            elif value.tag == 'BuyingPower':
+                portfolio_data['buyingPower'] = str(value.value)
+            elif value.tag == 'DayTradesRemainingT+1':
+                portfolio_data['dayPnL'] = str(value.value)
+
+        positions_list = []
+        for pos in positions:
+            positions_list.append({
+                'symbol': pos.contract.symbol,
+                'qty': str(pos.position),
+                'avg_entry_price': str(pos.avgCost) if pos.avgCost else None,
+                'current_price': None,  # Not directly available from position object
+                'market_value': str(pos.position * (pos.avgCost or 0)),
+                'unrealized_pl': '0',  # Placeholder
+                'unrealized_plpc': '0'  # Placeholder
+            })
+
+        orders_list = []
+        for trade in open_orders:
+            orders_list.append({
+                'id': str(trade.order.orderId),
+                'symbol': trade.contract.symbol,
+                'qty': str(trade.order.totalQuantity),
+                'side': trade.order.action.lower() if trade.order.action else 'buy',
+                'status': trade.orderStatus.status if trade.orderStatus else 'pending',
+                'created_at': datetime.now().isoformat()
+            })
+
+        payload = {
+            'type': 'portfolio_update',
+            'timestamp': datetime.now().isoformat(),
+            'data': {
+                'portfolio': portfolio_data,
+                'positions': positions_list,
+                'orders': orders_list
+            }
+        }
+
+        # POST to backend
+        try:
+            response = requests.post(BACKEND_WS_UPDATE_URL, json=payload, timeout=5)
+            if response.status_code == 200:
+                logger.debug(f"Posted WS update to backend ({len(positions_list)} positions, {len(orders_list)} orders)")
+            else:
+                logger.warning(f"Backend returned {response.status_code}: {response.text}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Failed to POST to backend: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in _collect_and_post: {e}")
+
+def _schedule_update(hint: str):
+    """Schedule a debounced update"""
+    global _debounce_timer
+
+    with _debounce_lock:
+        # Cancel pending timer
+        if _debounce_timer is not None:
+            _debounce_timer.cancel()
+
+        # Schedule new update
+        _debounce_timer = threading.Timer(DEBOUNCE_INTERVAL, _collect_and_post)
+        _debounce_timer.daemon = True
+        _debounce_timer.start()
+
+def _ibkr_background_thread():
+    """Background thread that listens to IBKR events and posts updates"""
+    try:
+        # Create dedicated event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        logger.info("Starting IBKR background thread...")
+
+        # Connect to IBKR
+        connector = get_connector()
+        loop.run_until_complete(connector.connect())
+
+        # Register event callbacks
+        connector.register_event_callbacks(_schedule_update)
+
+        # Run IBKR event loop in a separate thread
+        logger.info("Running IBKR event loop...")
+        connector.ib.run()
+
+    except Exception as e:
+        logger.error(f"IBKR background thread error: {e}")
+    finally:
+        logger.info("IBKR background thread exiting")
+
+# Start background thread at module level (before Flask starts)
+_bg_thread = threading.Thread(target=_ibkr_background_thread, daemon=True)
+_bg_thread.start()
+logger.info("IBKR background thread started (daemon)")
+
+# Also setup fallback polling every 30s in case events don't fire
+def _fallback_update_loop():
+    """Fallback: periodically collect and post data"""
+    while True:
+        try:
+            time.sleep(FALLBACK_INTERVAL)
+            _collect_and_post()
+        except Exception as e:
+            logger.error(f"Fallback update loop error: {e}")
+
+_fallback_thread = threading.Thread(target=_fallback_update_loop, daemon=True)
+_fallback_thread.start()
+logger.info("Fallback update thread started (daemon)")
 
 # ======================
 # HEALTH CHECK ENDPOINT

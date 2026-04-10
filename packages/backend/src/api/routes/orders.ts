@@ -1,218 +1,279 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import Decimal from 'decimal.js';
 import { logger } from '../../config/logger';
-import IBKRClient, { IBKROrder } from '../../broker/IBKRClient';
-import { Order } from '../../types';
+import { pythonService } from '../../services/PythonServiceClient';
 
 export async function ordersRoutes(app: FastifyInstance) {
-  const broker = IBKRClient;
 
   /**
-   * GET /api/orders - Get all orders
+   * GET /api/orders - Get all orders - REAL DATA from IBKR
    */
-  app.get<{
-    Querystring: { status?: string; limit?: number };
-    Reply: { success: boolean; data?: Order[]; error?: string };
-  }>('/api/orders', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/orders', async (request: FastifyRequest<{
+    Querystring: { status?: string; limit?: number }
+  }>, reply: FastifyReply) => {
     try {
-      const { status = 'all', limit = 50 } = request.query as {
-        status?: string;
-        limit?: number;
-      };
+      const { status, limit = 50 } = request.query as any;
 
-      logger.info(`Fetching orders with status: ${status}`);
+      logger.info(`Fetching orders (status: ${status || 'all'}, limit: ${limit})`);
 
-      const ibkrOrders = await broker.getOrders({
-        status: status === 'all' ? undefined : status,
-        limit
-      });
-
-      const mapStatus = (ibkrStatus: string): 'pending' | 'filled' | 'rejected' | 'cancelled' => {
-        const status = ibkrStatus.toLowerCase();
-        if (status === 'filled') return 'filled';
-        if (status === 'inactive' || status === 'cancelled') return 'cancelled';
-        if (status === 'apicancelled') return 'cancelled';
-        return 'pending';
-      };
-
-      const orders: Order[] = ibkrOrders.map((order: IBKROrder) => ({
-        id: order.order_id,
-        symbol: order.symbol,
-        quantity: order.qty ? parseInt(order.qty, 10) : 0,
-        side: order.side.toLowerCase() as 'buy' | 'sell',
-        type: order.order_type.toLowerCase().includes('lmt') ? 'limit' : 'market',
-        price: order.limit_price ? new Decimal(order.limit_price) : undefined,
-        status: mapStatus(order.status),
-        filledQuantity: parseInt(order.filled_qty, 10),
-        filledPrice: order.avg_filled_price ? new Decimal(order.avg_filled_price) : undefined,
-        timestamp: new Date(order.created_at)
-      }));
-
-      reply.send({
-        success: true,
-        data: orders
-      });
-    } catch (error) {
-      logger.error('Orders fetch failed:', error);
-      reply.status(500).send({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * GET /api/orders/:orderId - Get specific order
-   */
-  app.get<{
-    Params: { orderId: string };
-    Reply: { success: boolean; data?: Order; error?: string };
-  }>('/api/orders/:orderId', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { orderId } = request.params as { orderId: string };
-      logger.info(`Fetching order: ${orderId}`);
-
-      const ibkrOrder = await broker.getOrder(orderId);
-
-      const mapStatus = (ibkrStatus: string): 'pending' | 'filled' | 'rejected' | 'cancelled' => {
-        const status = ibkrStatus.toLowerCase();
-        if (status === 'filled') return 'filled';
-        if (status === 'inactive' || status === 'cancelled') return 'cancelled';
-        if (status === 'apicancelled') return 'cancelled';
-        return 'pending';
-      };
-
-      const order: Order = {
-        id: ibkrOrder.order_id,
-        symbol: ibkrOrder.symbol,
-        quantity: ibkrOrder.qty ? parseInt(ibkrOrder.qty, 10) : 0,
-        side: ibkrOrder.side.toLowerCase() as 'buy' | 'sell',
-        type: ibkrOrder.order_type.toLowerCase().includes('lmt') ? 'limit' : 'market',
-        price: ibkrOrder.limit_price ? new Decimal(ibkrOrder.limit_price) : undefined,
-        status: mapStatus(ibkrOrder.status),
-        filledQuantity: parseInt(ibkrOrder.filled_qty, 10),
-        filledPrice: ibkrOrder.avg_filled_price
-          ? new Decimal(ibkrOrder.avg_filled_price)
-          : undefined,
-        timestamp: new Date(ibkrOrder.created_at)
-      };
-
-      reply.send({
-        success: true,
-        data: order
-      });
-    } catch (error) {
-      logger.error('Order fetch failed:', error);
-      reply.status(500).send({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * POST /api/orders - Submit new order
-   */
-  app.post<{
-    Body: {
-      symbol: string;
-      qty?: number;
-      notional?: number;
-      side: 'buy' | 'sell';
-      type?: 'market' | 'limit';
-      limit_price?: number;
-      time_in_force?: 'day' | 'gtc';
-    };
-    Reply: { success: boolean; data?: Order; error?: string };
-  }>('/api/orders', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { symbol, qty, notional, side, type = 'market', limit_price, time_in_force = 'day' } =
-        request.body as {
-          symbol: string;
-          qty?: number;
-          notional?: number;
-          side: 'buy' | 'sell';
-          type?: 'market' | 'limit';
-          limit_price?: number;
-          time_in_force?: 'day' | 'gtc';
-        };
-
-      if (!qty && !notional) {
-        return reply.status(400).send({
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
           success: false,
-          error: 'Either qty or notional must be provided'
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
         });
       }
 
-      logger.info(`Submitting order: ${side} ${qty || notional} ${symbol}`);
+      let orders = await pythonService.getOrders();
 
-      const ibkrOrder = await broker.submitOrder({
-        symbol,
-        qty: qty || 100, // IBKR requires qty
-        side: side as 'buy' | 'sell',
-        order_type: type as 'market' | 'limit',
-        limit_price,
-        time_in_force: time_in_force as 'day' | 'gtc'
-      });
+      // Filter by status if specified
+      if (status && status !== 'all') {
+        orders = orders.filter(o => o.status.toLowerCase() === status.toLowerCase());
+      }
 
-      const mapStatus = (ibkrStatus: string): 'pending' | 'filled' | 'rejected' | 'cancelled' => {
-        const status = ibkrStatus.toLowerCase();
-        if (status === 'filled') return 'filled';
-        if (status === 'inactive' || status === 'cancelled') return 'cancelled';
-        if (status === 'apicancelled') return 'cancelled';
-        return 'pending';
-      };
+      // Apply limit
+      orders = orders.slice(0, limit);
 
-      const order: Order = {
-        id: ibkrOrder.order_id,
-        symbol: ibkrOrder.symbol,
-        quantity: ibkrOrder.qty ? parseInt(ibkrOrder.qty, 10) : 0,
-        side: ibkrOrder.side.toLowerCase() as 'buy' | 'sell',
-        type: ibkrOrder.order_type.toLowerCase().includes('lmt') ? 'limit' : 'market',
-        price: ibkrOrder.limit_price ? new Decimal(ibkrOrder.limit_price) : undefined,
-        status: mapStatus(ibkrOrder.status),
-        filledQuantity: parseInt(ibkrOrder.filled_qty, 10),
-        filledPrice: ibkrOrder.avg_filled_price
-          ? new Decimal(ibkrOrder.avg_filled_price)
-          : undefined,
-        timestamp: new Date(ibkrOrder.created_at)
-      };
-
-      reply.status(201).send({
+      return reply.send({
         success: true,
-        data: order
+        timestamp: new Date().toISOString(),
+        data: {
+          orders: orders.map(order => ({
+            id: order.order_id,
+            symbol: order.symbol,
+            qty: order.qty,
+            filledQty: order.filled_qty,
+            side: order.side,
+            type: order.order_type,
+            status: order.status,
+            limitPrice: order.limit_price,
+            stopPrice: order.stop_price,
+            createdAt: order.created_at
+          })),
+          count: orders.length
+        }
       });
-    } catch (error) {
-      logger.error('Order submission failed:', error);
-      reply.status(500).send({
+    } catch (error: any) {
+      logger.error('Orders fetch failed:', error);
+      return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: {
+          code: 'ORDERS_FETCH_FAILED',
+          message: error.message
+        }
       });
     }
   });
 
   /**
-   * DELETE /api/orders/:orderId - Cancel order
+   * GET /api/orders/:orderId - Get specific order - REAL DATA
    */
-  app.delete<{
-    Params: { orderId: string };
-    Reply: { success: boolean; message?: string; error?: string };
-  }>('/api/orders/:orderId', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/orders/:orderId', async (request: FastifyRequest<{
+    Params: { orderId: string }
+  }>, reply: FastifyReply) => {
     try {
-      const { orderId } = request.params as { orderId: string };
+      const { orderId } = request.params;
+
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
+        });
+      }
+
+      const orders = await pythonService.getOrders();
+      const order = orders.find(o => o.order_id === orderId);
+
+      if (!order) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'ORDER_NOT_FOUND',
+            message: `Order ${orderId} not found`
+          }
+        });
+      }
+
+      return reply.send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          id: order.order_id,
+          symbol: order.symbol,
+          qty: order.qty,
+          filledQty: order.filled_qty,
+          side: order.side,
+          type: order.order_type,
+          status: order.status,
+          limitPrice: order.limit_price,
+          stopPrice: order.stop_price,
+          createdAt: order.created_at
+        }
+      });
+    } catch (error: any) {
+      logger.error('Order fetch failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'ORDER_FETCH_FAILED',
+          message: error.message
+        }
+      });
+    }
+  });
+
+  /**
+   * POST /api/orders - Submit new order - REAL ORDER to IBKR
+   */
+  app.post('/api/orders', async (request: FastifyRequest<{
+    Body: {
+      symbol: string;
+      quantity: number;
+      side: 'BUY' | 'SELL';
+      orderType: 'MKT' | 'LMT' | 'STP';
+      limitPrice?: number;
+      stopPrice?: number;
+    }
+  }>, reply: FastifyReply) => {
+    try {
+      const { symbol, quantity, side, orderType, limitPrice, stopPrice } = request.body;
+
+      logger.info(`Submitting order: ${side} ${quantity} ${symbol} @ ${orderType}`);
+
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR. Cannot submit orders.'
+          }
+        });
+      }
+
+      // Validate
+      if (!symbol || !quantity || !side || !orderType) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: 'INVALID_ORDER',
+            message: 'Missing required fields: symbol, quantity, side, orderType'
+          }
+        });
+      }
+
+      if (orderType === 'LMT' && !limitPrice) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: 'INVALID_ORDER',
+            message: 'Limit price required for LMT orders'
+          }
+        });
+      }
+
+      // Submit to IBKR
+      const order = await pythonService.submitOrder({
+        symbol: symbol.toUpperCase(),
+        quantity,
+        order_type: orderType,
+        price: limitPrice
+      });
+
+      if (!order) {
+        return reply.status(500).send({
+          success: false,
+          error: {
+            code: 'ORDER_SUBMISSION_FAILED',
+            message: 'Failed to submit order to IBKR'
+          }
+        });
+      }
+
+      logger.info(`Order submitted: ${order.order_id}`);
+
+      return reply.status(201).send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          orderId: order.order_id,
+          symbol: symbol.toUpperCase(),
+          quantity,
+          side,
+          type: orderType,
+          status: order.status,
+          message: 'Order submitted to IBKR'
+        }
+      });
+    } catch (error: any) {
+      logger.error('Order submission failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'ORDER_SUBMISSION_FAILED',
+          message: error.message
+        }
+      });
+    }
+  });
+
+  /**
+   * DELETE /api/orders/:orderId - Cancel order - REAL CANCEL to IBKR
+   */
+  app.delete('/api/orders/:orderId', async (request: FastifyRequest<{
+    Params: { orderId: string }
+  }>, reply: FastifyReply) => {
+    try {
+      const { orderId } = request.params;
+
       logger.info(`Cancelling order: ${orderId}`);
 
-      await broker.cancelOrder(orderId);
+      const isConnected = await pythonService.isConnected();
+      if (!isConnected) {
+        return reply.status(503).send({
+          success: false,
+          error: {
+            code: 'IBKR_DISCONNECTED',
+            message: 'Not connected to IBKR'
+          }
+        });
+      }
 
-      reply.send({
+      const success = await pythonService.cancelOrder(orderId);
+
+      if (!success) {
+        return reply.status(500).send({
+          success: false,
+          error: {
+            code: 'CANCEL_FAILED',
+            message: `Failed to cancel order ${orderId}`
+          }
+        });
+      }
+
+      return reply.send({
         success: true,
-        message: `Order ${orderId} cancelled`
+        timestamp: new Date().toISOString(),
+        data: {
+          orderId,
+          status: 'CANCELLED',
+          message: 'Order cancellation submitted'
+        }
       });
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Order cancellation failed:', error);
-      reply.status(500).send({
+      return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: {
+          code: 'CANCEL_FAILED',
+          message: error.message
+        }
       });
     }
   });

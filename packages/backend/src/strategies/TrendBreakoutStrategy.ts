@@ -20,8 +20,6 @@ export class TrendBreakoutStrategy extends BaseStrategy {
 
   // Configurable parameters
   private minConfidence = parseInt(process.env.STRATEGY_1_MIN_CONFIDENCE || '60');
-  private maFast = parseInt(process.env.STRATEGY_1_MA_FAST || '50');
-  private maSlow = parseInt(process.env.STRATEGY_1_MA_SLOW || '200');
   private rsiMin = parseInt(process.env.STRATEGY_1_RSI_MIN || '40');
   private rsiMax = parseInt(process.env.STRATEGY_1_RSI_MAX || '70');
   private rvolThreshold = parseFloat(process.env.STRATEGY_1_RVOL_THRESHOLD || '1.5');
@@ -34,21 +32,23 @@ export class TrendBreakoutStrategy extends BaseStrategy {
       for (const [symbol, analysis] of analysisResults) {
         if (!analysis) continue;
 
-        // Extract analysis data
         const trendState = analysis.trend || {};
         const momentumState = analysis.momentum || {};
         const volumeState = analysis.volume || {};
         const regimeState = analysis.regime || {};
         const volatilityState = analysis.volatility || {};
+        const currentPrice = analysis.current_price || analysis.currentPrice || 0;
+
+        if (currentPrice <= 0) continue;
 
         // Check all entry conditions
         const conditions = {
           maBullish: this.checkMAAlignment(trendState),
-          breakoutSignal: this.checkBreakoutSignal(analysis),
-          volumeConfirm: volumeState.rvol >= this.rvolThreshold,
-          rsiValid: momentumState.rsi >= this.rsiMin && momentumState.rsi <= this.rsiMax,
-          macdPositive: momentumState.macd_histogram > 0,
-          bullishRegime: regimeState.regime === 'bull'
+          breakoutSignal: this.checkBreakoutSignal(analysis, currentPrice),
+          volumeConfirm: (volumeState.rvol || 1) >= this.rvolThreshold,
+          rsiValid: (momentumState.rsi || 50) >= this.rsiMin && (momentumState.rsi || 50) <= this.rsiMax,
+          macdPositive: (momentumState.macd_histogram || 0) > 0,
+          bullishRegime: regimeState.classification === 'bull' || regimeState.regime === 'bull'
         };
 
         const conditionsMet = Object.values(conditions).filter(Boolean).length;
@@ -60,22 +60,33 @@ export class TrendBreakoutStrategy extends BaseStrategy {
           confidence += conditions.volumeConfirm ? 10 : 0;
           confidence += conditions.macdPositive ? 5 : 0;
           confidence += conditions.bullishRegime ? 5 : 0;
+          confidence += conditionsMet === 6 ? 5 : 0;
 
           if (confidence >= this.minConfidence) {
+            // Calculate REAL stop loss based on ATR
+            const atr = volatilityState.atr || currentPrice * 0.02;
+            const stopLossPrice = currentPrice - (atr * this.atrMultiplier);
+            const maxStopLoss = currentPrice * 0.95; // 5% max
+            const finalStopLoss = Math.max(stopLossPrice, maxStopLoss);
+
+            // Calculate REAL take profit (2:1 R:R)
+            const riskPerShare = currentPrice - finalStopLoss;
+            const takeProfit = currentPrice + (riskPerShare * 2);
+
             const signal: TradeSignal = {
               symbol,
               direction: 'long',
-              entryPrice: new Decimal(analysis.current_price || 0),
-              stopLoss: new Decimal(analysis.support_level || 0),
-              takeProfit: new Decimal(analysis.resistance_level || 0),
-              riskAmount: new Decimal(0),
-              riskPercent: 1,
+              entryPrice: new Decimal(currentPrice),
+              stopLoss: new Decimal(finalStopLoss),
+              takeProfit: new Decimal(takeProfit),
+              riskAmount: new Decimal(riskPerShare * 100), // Per 100 shares
+              riskPercent: (riskPerShare / currentPrice) * 100,
               confidence,
               rating: this.getConfidenceRating(confidence),
               strategy: this.name,
               timeframe: '1D',
               timestamp: new Date(),
-              reasoning: `${this.name}: MA bullish, volume confirmation, MACD positive, bullish regime`
+              reasoning: `${this.name}: MA bullish=${conditions.maBullish}, RVOL=${(volumeState.rvol || 1).toFixed(2)}x, RSI=${(momentumState.rsi || 50).toFixed(1)}, Stop=$${finalStopLoss.toFixed(2)}`
             };
 
             signals.push(signal);
@@ -91,27 +102,19 @@ export class TrendBreakoutStrategy extends BaseStrategy {
   }
 
   private checkMAAlignment(trendState: any): boolean {
-    // Check if all moving averages are aligned bullishly
-    return (
-      trendState.ma_50 > 0 &&
-      trendState.ma_100 > 0 &&
-      trendState.ma_200 > 0 &&
-      trendState.ma_50 > trendState.ma_100 &&
-      trendState.ma_100 > trendState.ma_200
-    );
+    const ma50 = trendState.ma_50 || trendState.ma50 || 0;
+    const ma100 = trendState.ma_100 || trendState.ma100 || 0;
+    const ma200 = trendState.ma_200 || trendState.ma200 || 0;
+
+    return ma50 > 0 && ma100 > 0 && ma200 > 0 && ma50 > ma100 && ma100 > ma200;
   }
 
-  private checkBreakoutSignal(analysis: any): boolean {
-    // Check if price broke above resistance with volume
-    const currentPrice = analysis.current_price || 0;
-    const resistance = analysis.resistance_level || 0;
-    const volume = analysis.volume || 0;
-    const avgVolume = analysis.volume_ma || 1;
+  private checkBreakoutSignal(analysis: any, currentPrice: number): boolean {
+    const resistance = analysis.resistance_level || analysis.support_resistance?.resistance || 0;
+    const volume = analysis.volume?.current || analysis.volume || 0;
+    const avgVolume = analysis.volume?.average || analysis.volume_ma || 1;
 
-    return (
-      currentPrice > resistance &&
-      volume > avgVolume * 1.5 // At least 1.5x average volume
-    );
+    return currentPrice > resistance * 0.98 && volume > avgVolume * 1.5;
   }
 
   private getConfidenceRating(confidence: number): string {
