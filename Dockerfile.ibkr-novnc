@@ -194,8 +194,10 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Container shutting down..."
 
 STARTUP
 
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh && \
+    sed -i 's/\r$//' /start.sh && \
+    head -1 /start.sh
 
 EXPOSE 4002 5900 6080
 
-CMD ["/start.sh"]
+CMD ["/bin/bash", "/start.sh"]
