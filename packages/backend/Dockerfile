@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install dependencies and build
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY src/ ./src/
@@ -14,7 +14,7 @@ COPY tsconfig.json ./
 RUN npm run build
 
 # Remove dev dependencies for production
-RUN npm ci --only=production
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # Expose port
 EXPOSE 6005
