@@ -1,0 +1,13 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/backtest/page": "app/backtest/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/orders/page": "app/orders/page.js",
+  "/page": "app/page.js",
+  "/performance/page": "app/performance/page.js",
+  "/positions/page": "app/positions/page.js",
+  "/market/page": "app/market/page.js",
+  "/strategies/page": "app/strategies/page.js",
+  "/risk/page": "app/risk/page.js",
+  "/settings/page": "app/settings/page.js"
+}
