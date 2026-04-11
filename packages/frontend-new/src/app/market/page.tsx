@@ -57,13 +57,13 @@ export default function MarketDataPage() {
           <CardDescription>Real-time market data with 1-second refresh</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isLoading && !marketData ? (
             <div className="space-y-2">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-14 w-full" />
               ))}
             </div>
-          ) : error ? (
+          ) : !marketData && error ? (
             <div className="text-center py-8 text-muted-foreground">
               <p>Unable to fetch market data</p>
               <p className="text-sm mt-1">Check IBKR connection</p>

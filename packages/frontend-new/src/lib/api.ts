@@ -301,6 +301,8 @@ export function useMarketData(symbols: string[]) {
     queryKey: ["marketData", symbols],
     queryFn: () => api.getMarketData(symbols),
     refetchInterval: 1000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
     enabled: symbols.length > 0,
   });
 }
