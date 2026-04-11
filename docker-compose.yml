@@ -103,16 +103,18 @@ services:
       retries: 3
       start_period: 30s
 
-  # React Frontend
+  # Next.js Frontend
   frontend:
     build:
-      context: ./packages/frontend
+      context: ./packages/frontend-new
       dockerfile: Dockerfile
     container_name: frontend
     restart: always
     environment:
-      REACT_APP_API_URL: http://localhost:6005
-      REACT_APP_WS_URL: ws://localhost:6005
+      NODE_ENV: production
+      PORT: 6205
+      NEXT_PUBLIC_API_URL: http://46.202.89.48:6005
+      NEXT_PUBLIC_WS_URL: ws://46.202.89.48:6005
     ports:
       - "6205:6205"
     depends_on:

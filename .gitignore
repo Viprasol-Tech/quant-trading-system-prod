@@ -86,4 +86,3 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-packages/frontend-new/

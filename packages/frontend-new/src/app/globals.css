@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 14% 10%;
+    --foreground: 0 0% 98%;
+    --card: 220 14% 12%;
+    --card-foreground: 0 0% 98%;
+    --popover: 220 14% 12%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 10%;
+    --secondary: 220 14% 18%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 220 14% 18%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 220 14% 18%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 14% 20%;
+    --input: 220 14% 20%;
+    --ring: 142 71% 45%;
+    --radius: 0.5rem;
+    
+    --chart-1: 142 71% 45%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 47 96% 53%;
+    --chart-4: 292 84% 61%;
+    --chart-5: 199 89% 48%;
+    
+    --sidebar: 220 14% 8%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 142 71% 45%;
+    --sidebar-primary-foreground: 0 0% 10%;
+    --sidebar-accent: 220 14% 15%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 220 14% 18%;
+    --sidebar-ring: 142 71% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Trading-specific utility classes */
+.profit {
+  color: hsl(142 71% 45%);
+}
+.loss {
+  color: hsl(0 84% 60%);
+}
+.glow-profit {
+  box-shadow: 0 0 20px hsl(142 71% 45% / 20%);
+}
+.glow-loss {
+  box-shadow: 0 0 20px hsl(0 84% 60% / 20%);
+}
