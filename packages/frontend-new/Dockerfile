@@ -11,9 +11,6 @@ RUN npm ci --only=production
 # Copy pre-built .next folder
 COPY .next ./.next
 
-# Copy public assets
-COPY public ./public 2>/dev/null || true
-
 EXPOSE 6205
 
 ENV NODE_ENV=production
