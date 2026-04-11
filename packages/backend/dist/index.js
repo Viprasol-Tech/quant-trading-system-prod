@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("reflect-metadata");
 const fastify_1 = __importDefault(require("fastify"));
 const websocket_1 = __importDefault(require("@fastify/websocket"));
+const cors_1 = __importDefault(require("@fastify/cors"));
 const logger_1 = require("./config/logger");
 const environment_1 = require("./config/environment");
 const routes_1 = require("./api/routes");
@@ -52,6 +53,14 @@ const start = async () => {
         // Register WebSocket plugin BEFORE setting up routes
         await app.register(websocket_1.default);
         logger_1.logger.info('WebSocket plugin registered');
+        // Register CORS plugin
+        await app.register(cors_1.default, {
+            origin: true,
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+            credentials: true
+        });
+        logger_1.logger.info('CORS plugin registered');
         // Setup routes - MUST be awaited
         await (0, routes_1.setupRoutes)(app);
         logger_1.logger.info('Routes setup completed successfully');

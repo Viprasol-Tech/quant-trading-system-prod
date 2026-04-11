@@ -14,9 +14,13 @@ const strategies_1 = require("./strategies");
 const risk_1 = require("./risk");
 const compliance_1 = require("./compliance");
 const ws_1 = require("./ws");
+const system_1 = require("./system");
 async function setupRoutes(app) {
     logger_1.logger.info('Setting up API routes...');
     try {
+        // Register System routes (status check, used by frontend)
+        await app.register(system_1.systemRoutes);
+        logger_1.logger.info('✓ System routes registered');
         // Register Phase 1 routes
         await app.register(portfolio_1.default);
         logger_1.logger.info('✓ Portfolio routes registered');
