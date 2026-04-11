@@ -11,7 +11,7 @@ final*.sh
 check*.py
 restart*.py
 start*.py
-start*.sh
+# start*.sh - removed to allow start.sh to be tracked for Docker builds
 verify*.py
 upload*.py
 wait*.py
