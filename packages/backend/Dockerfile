@@ -2,12 +2,19 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies - handle both dev and prod
+# Install dependencies and build
 COPY package*.json ./
-RUN npm ci --only=production || npm install
+RUN npm ci
 
-# Copy built code
-COPY dist/ ./dist/
+# Copy source code
+COPY src/ ./src/
+COPY tsconfig.json ./
+
+# Build TypeScript
+RUN npm run build
+
+# Remove dev dependencies for production
+RUN npm ci --only=production
 
 # Expose port
 EXPOSE 6005
