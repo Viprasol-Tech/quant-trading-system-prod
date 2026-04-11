@@ -9,11 +9,16 @@ import { strategiesRoutes } from './strategies';
 import { riskRoutes } from './risk';
 import { setupComplianceRoutes } from './compliance';
 import { wsRoutes } from './ws';
+import { systemRoutes } from './system';
 
 export async function setupRoutes(app: FastifyInstance) {
   logger.info('Setting up API routes...');
 
   try {
+    // Register System routes (status check, used by frontend)
+    await app.register(systemRoutes);
+    logger.info('✓ System routes registered');
+
     // Register Phase 1 routes
     await app.register(portfolioRoutes);
     logger.info('✓ Portfolio routes registered');
