@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production
+RUN npm install --legacy-peer-deps && npm prune --omit=dev --legacy-peer-deps
 
 # Copy pre-built .next folder
 COPY .next ./.next
