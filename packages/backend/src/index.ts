@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import Fastify from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
+import fastifyCors from '@fastify/cors';
 import { logger } from './config/logger';
 import { config } from './config/environment';
 import { setupRoutes } from './api/routes';
@@ -55,6 +56,15 @@ const start = async () => {
     // Register WebSocket plugin BEFORE setting up routes
     await app.register(fastifyWebsocket);
     logger.info('WebSocket plugin registered');
+
+    // Register CORS plugin
+    await app.register(fastifyCors, {
+      origin: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      credentials: true
+    });
+    logger.info('CORS plugin registered');
 
     // Setup routes - MUST be awaited
     await setupRoutes(app);
