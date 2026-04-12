@@ -85,6 +85,9 @@ export interface IBKROrder {
 }
 
 /**
+ * @deprecated DO NOT USE - Contains mock implementations only
+ * Use PythonServiceClient instead for all IBKR integration
+ *
  * IBKR Gateway Client
  * Connects to IBKR Gateway via socket and provides REST-like interface
  *

@@ -161,8 +161,8 @@ class ApiClient {
   }
 
   async getPositions(): Promise<Position[]> {
-    const response = await this.request<Record<string, Position>>("/positions");
-    return Object.values(response);
+    const response = await this.request<{ success: boolean; timestamp: string; data: { positions: Position[]; count: number } }>("/positions");
+    return response.data?.positions || [];
   }
 
   // Orders

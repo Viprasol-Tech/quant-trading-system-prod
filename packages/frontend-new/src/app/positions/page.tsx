@@ -24,8 +24,8 @@ function formatPercent(value: number, cost: number) {
 export default function PositionsPage() {
   const { data: positions, isLoading, error } = usePositions();
 
-  const totalValue = positions?.reduce((sum, p) => sum + p.marketValue, 0) || 0;
-  const totalPnL = positions?.reduce((sum, p) => sum + p.unrealizedPnL, 0) || 0;
+  const totalValue = positions?.reduce((sum, p) => sum + parseFloat(p.market_value), 0) || 0;
+  const totalPnL = positions?.reduce((sum, p) => sum + parseFloat(p.unrealized_pl), 0) || 0;
 
   return (
     <div className="space-y-6">
@@ -102,44 +102,44 @@ export default function PositionsPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <div className="font-medium">{position.symbol}</div>
-                        <Badge variant={position.quantity > 0 ? "default" : "destructive"}>
-                          {position.quantity > 0 ? "LONG" : "SHORT"}
+                        <Badge variant={parseInt(position.qty) > 0 ? "default" : "destructive"}>
+                          {parseInt(position.qty) > 0 ? "LONG" : "SHORT"}
                         </Badge>
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {Math.abs(position.quantity)}
+                      {Math.abs(parseInt(position.qty))}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(position.avgCost)}
+                      {formatCurrency(parseFloat(position.avg_entry_price))}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(position.marketPrice)}
+                      {formatCurrency(parseFloat(position.current_price))}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(position.marketValue)}
+                      {formatCurrency(parseFloat(position.market_value))}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {position.unrealizedPnL >= 0 ? (
+                        {parseFloat(position.unrealized_pl) >= 0 ? (
                           <TrendingUp className="h-4 w-4 text-green-500" />
                         ) : (
                           <TrendingDown className="h-4 w-4 text-red-500" />
                         )}
                         <span
                           className={`font-mono ${
-                            position.unrealizedPnL >= 0 ? "text-green-500" : "text-red-500"
+                            parseFloat(position.unrealized_pl) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {formatCurrency(position.unrealizedPnL)}
+                          {formatCurrency(parseFloat(position.unrealized_pl))}
                         </span>
                       </div>
                       <div
                         className={`text-xs ${
-                          position.unrealizedPnL >= 0 ? "text-green-500" : "text-red-500"
+                          parseFloat(position.unrealized_pl) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatPercent(position.unrealizedPnL, position.avgCost * Math.abs(position.quantity))}
+                        {formatPercent(parseFloat(position.unrealized_pl), parseFloat(position.avg_entry_price) * Math.abs(parseInt(position.qty)))}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
