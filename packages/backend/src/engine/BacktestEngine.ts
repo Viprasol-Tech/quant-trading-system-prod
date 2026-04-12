@@ -116,8 +116,8 @@ export class BacktestEngine {
       const analysisSlice = bars.slice(0, i);
 
       try {
-        // Run technical analysis on historical slice
-        const analysis = await this.taEngine.analyze(analysisSlice, config.symbol);
+        // Run technical analysis on historical slice (static method)
+        const analysis = TechnicalAnalysisEngine.analyze(analysisSlice, config.symbol);
 
         // Adapt analysis from TypeScript format to strategy-expected format
         const adaptedAnalysis = this.adaptAnalysisForStrategy(analysis, analysisSlice);
@@ -145,7 +145,7 @@ export class BacktestEngine {
             position = {
               quantity,
               entryPrice,
-              entryDate: currentBar.timestamp,
+              entryDate: currentBar.timestamp instanceof Date ? currentBar.timestamp.toISOString() : String(currentBar.timestamp),
               stopLoss,
               takeProfit
             };
@@ -200,7 +200,7 @@ export class BacktestEngine {
 
             trades.push({
               entryDate: position.entryDate,
-              exitDate: currentBar.timestamp,
+              exitDate: currentBar.timestamp instanceof Date ? currentBar.timestamp.toISOString() : String(currentBar.timestamp),
               symbol: config.symbol,
               action: 'LONG',
               entryPrice: position.entryPrice,
@@ -228,7 +228,7 @@ export class BacktestEngine {
 
         equity = cash + positionValue;
         equityCurve.push({
-          date: currentBar.timestamp,
+          date: currentBar.timestamp instanceof Date ? currentBar.timestamp.toISOString() : String(currentBar.timestamp),
           equity
         });
 
@@ -253,7 +253,7 @@ export class BacktestEngine {
 
       trades.push({
         entryDate: position.entryDate,
-        exitDate: lastBar.timestamp,
+        exitDate: lastBar.timestamp instanceof Date ? lastBar.timestamp.toISOString() : String(lastBar.timestamp),
         symbol: config.symbol,
         action: 'LONG',
         entryPrice: position.entryPrice,
