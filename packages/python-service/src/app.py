@@ -1,6 +1,10 @@
 """
 Python Service - Flask API for Trading System
 Bridges between Frontend/Backend and IBKR Gateway
+
+CRITICAL: Uses dedicated event loop thread + run_coroutine_threadsafe() for thread-safe
+asyncio communication. This is the ONLY correct pattern for Flask + ib_insync integration.
+See: https://docs.python.org/3/library/asyncio-dev.html#debug-mode
 """
 
 import asyncio
@@ -10,6 +14,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from concurrent.futures import Future
 
 # Add src directory to path BEFORE imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +23,8 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
 from ibkr_connector import get_connector
+from scheduler import start_scheduler, stop_scheduler, get_scan_status, run_daily_scan
+from notifications import get_notifier
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -27,93 +34,136 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# Global event loop - set before first use
-def get_event_loop():
-    """Get or create event loop properly"""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError("Event loop is closed")
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    return loop
+# ======================
+# DEDICATED IB_INSYNC EVENT LOOP THREAD (Topic 5 fix)
+# ======================
 
-# Initialize IBKR on startup
-def ensure_ibkr_connected():
-    """Ensure IBKR is connected before handling requests"""
-    async def init():
+_ib_loop: asyncio.AbstractEventLoop = None
+_loop_ready = threading.Event()
+
+def _start_ib_event_loop():
+    """
+    Run ib_insync in a dedicated background thread with its own event loop.
+    This is the ONLY correct pattern for Flask + ib_insync.
+
+    Why NOT loop.run_until_complete(): It must be called from the thread that
+    owns the loop, and CANNOT be called while the loop is already running.
+    ib.run() keeps the loop running forever, so run_until_complete() will crash.
+
+    Correct pattern: dedicated thread with run_coroutine_threadsafe().
+    """
+    global _ib_loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    _ib_loop = loop
+
+    try:
+        logger.info("IB event loop thread: starting ib_insync connection...")
         connector = get_connector()
-        try:
-            logger.info("Attempting to connect to IBKR...")
-            await connector.connect()
-            logger.info("IBKR connection successful!")
-        except Exception as e:
-            logger.warning(f"IBKR connection failed: {e}")
+
+        # Connect synchronously in the asyncio thread
+        async def connect_ib():
+            await connector.connect(retries=3)
+
+        loop.run_until_complete(connect_ib())
+        logger.info("IB event loop thread: IBKR connected successfully")
+    except Exception as e:
+        logger.error(f"IB event loop thread: connection failed: {e}")
+
+    _loop_ready.set()
 
     try:
-        loop = get_event_loop()
-        loop.run_until_complete(init())
+        logger.info("IB event loop thread: starting ib.run() (runs forever)")
+        connector.ib.run()
     except Exception as e:
-        logger.error(f"Event loop error: {e}")
+        logger.error(f"IB event loop thread: ib.run() crashed: {e}")
+    finally:
+        logger.info("IB event loop thread: shutting down")
+        loop.close()
+
+def _ib_call(coro, timeout=10):
+    """
+    Thread-safe bridge from Flask thread → ib_insync event loop thread.
+
+    ONLY correct way to schedule async work from a different thread.
+    See: https://docs.python.org/3/library/asyncio.html#asyncio.run_coroutine_threadsafe
+
+    Returns: result (not a Future) or raises exception
+    Timeout: seconds to wait (default 10, set higher for slow operations)
+    """
+    if _ib_loop is None:
+        raise RuntimeError("IB event loop not initialized")
+
+    future: Future = asyncio.run_coroutine_threadsafe(coro, _ib_loop)
+    return future.result(timeout=timeout)
+
+# Start IB event loop thread at module level (BEFORE Flask starts)
+_ib_thread = threading.Thread(target=_start_ib_event_loop, daemon=True)
+_ib_thread.start()
+
+# Wait for IBKR connection with 30-second timeout (don't block forever)
+if not _loop_ready.wait(timeout=30):
+    logger.warning("IBKR connection timeout after 30s — continuing anyway (server will retry)")
+else:
+    logger.info("IBKR event loop thread started and ready")
+
+# Start scheduler at MODULE LEVEL (works for all deployment methods: docker, direct python, gunicorn)
+# Module-level code runs regardless of how app.py is invoked
+start_scheduler()
+logger.info("Scheduler initialized at module level")
 
 # ======================
-# WEBSOCKET BACKGROUND THREAD
+# WEBSOCKET BACKGROUND PUSH (BUG 2 FIX)
 # ======================
 
-_debounce_timer = None
-_debounce_lock = threading.Lock()
-BACKEND_WS_UPDATE_URL = os.getenv('BACKEND_URL', 'http://backend:6005') + '/api/ws-update'
-DEBOUNCE_INTERVAL = 0.15  # 150ms debounce
-FALLBACK_INTERVAL = 30  # 30s fallback
+BACKEND_WS_UPDATE_URL = os.getenv('BACKEND_WS_UPDATE_URL', 'http://localhost:6005/api/ws-update')
+FALLBACK_INTERVAL = 30  # seconds
 
 def _collect_and_post():
-    """Collect current IBKR data and POST to backend"""
+    """
+    Background function to collect IBKR data and POST to backend for WebSocket broadcast.
+    Uses thread-safe _ib_call() to get real position data (not raw cache).
+
+    This runs every FALLBACK_INTERVAL seconds and pushes updates to connected clients.
+    """
     try:
         connector = get_connector()
         if not connector.connected:
             logger.debug("IBKR not connected, skipping WS update")
             return
 
-        # Get current data from ib_insync cache (thread-safe)
-        account_summary = connector.ib.accountSummary()
-        positions = connector.ib.positions()
-        open_orders = connector.ib.openOrders()
+        # Use _ib_call to get real data with market prices (thread-safe)
+        async def _get_all():
+            account = await connector.get_account_summary()
+            positions = await connector.get_positions()
+            open_orders = connector.ib.openOrders()
+            return account, positions, open_orders
 
-        # Build payload
+        account_data, positions_dict, open_orders = _ib_call(_get_all(), timeout=30)
+
+        # Build portfolio data
         portfolio_data = {
-            'totalEquity': '0',
-            'cash': '0',
-            'buyingPower': '0',
+            'totalEquity': str(account_data.get('net_liquidation', 0)),
+            'cash': str(account_data.get('total_cash', 0)),
+            'buyingPower': str(account_data.get('buying_power', 0)),
             'dayPnL': '0',
-            'unrealizedPnL': '0'
+            'unrealizedPnL': str(account_data.get('net_liquidation', 0))
         }
 
-        for value in account_summary:
-            if value.tag == 'NetLiquidation':
-                portfolio_data['totalEquity'] = str(value.value)
-            elif value.tag == 'TotalCashValue':
-                portfolio_data['cash'] = str(value.value)
-            elif value.tag == 'BuyingPower':
-                portfolio_data['buyingPower'] = str(value.value)
-            elif value.tag == 'DayTradesRemainingT+1':
-                portfolio_data['dayPnL'] = str(value.value)
-
+        # Build positions list (positions_dict has real market data)
         positions_list = []
-        for pos in positions:
+        for symbol, pos_data in positions_dict.items():
             positions_list.append({
-                'symbol': pos.contract.symbol,
-                'qty': str(pos.position),
-                'avg_entry_price': str(pos.avgCost) if pos.avgCost else None,
-                'current_price': None,  # Not directly available from position object
-                'market_value': str(pos.position * (pos.avgCost or 0)),
-                'unrealized_pl': '0',  # Placeholder
-                'unrealized_plpc': '0'  # Placeholder
+                'symbol': pos_data.get('symbol', symbol),
+                'qty': pos_data.get('qty', '0'),
+                'avg_entry_price': pos_data.get('avg_entry_price', '0'),
+                'current_price': pos_data.get('current_price', '0'),
+                'market_value': pos_data.get('market_value', '0'),
+                'unrealized_pl': pos_data.get('unrealized_pl', '0'),
+                'unrealized_plpc': pos_data.get('unrealized_plpc', '0'),
             })
 
+        # Build orders list
         orders_list = []
         for trade in open_orders:
             orders_list.append({
@@ -136,75 +186,24 @@ def _collect_and_post():
         }
 
         # POST to backend
-        try:
-            response = requests.post(BACKEND_WS_UPDATE_URL, json=payload, timeout=5)
-            if response.status_code == 200:
-                logger.debug(f"Posted WS update to backend ({len(positions_list)} positions, {len(orders_list)} orders)")
-            else:
-                logger.warning(f"Backend returned {response.status_code}: {response.text}")
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to POST to backend: {e}")
+        response = requests.post(BACKEND_WS_UPDATE_URL, json=payload, timeout=5)
+        if response.status_code == 200:
+            logger.debug(f"Posted WS update: {len(positions_list)} positions")
+        else:
+            logger.warning(f"Backend returned {response.status_code}")
 
     except Exception as e:
         logger.error(f"Error in _collect_and_post: {e}")
 
-def _schedule_update(hint: str):
-    """Schedule a debounced update"""
-    global _debounce_timer
-
-    with _debounce_lock:
-        # Cancel pending timer
-        if _debounce_timer is not None:
-            _debounce_timer.cancel()
-
-        # Schedule new update
-        _debounce_timer = threading.Timer(DEBOUNCE_INTERVAL, _collect_and_post)
-        _debounce_timer.daemon = True
-        _debounce_timer.start()
-
-def _ibkr_background_thread():
-    """Background thread that listens to IBKR events and posts updates"""
-    try:
-        # Create dedicated event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        logger.info("Starting IBKR background thread...")
-
-        # Connect to IBKR
-        connector = get_connector()
-        loop.run_until_complete(connector.connect())
-
-        # Register event callbacks
-        connector.register_event_callbacks(_schedule_update)
-
-        # Run IBKR event loop in a separate thread
-        logger.info("Running IBKR event loop...")
-        connector.ib.run()
-
-    except Exception as e:
-        logger.error(f"IBKR background thread error: {e}")
-    finally:
-        logger.info("IBKR background thread exiting")
-
-# Start background thread at module level (before Flask starts)
-_bg_thread = threading.Thread(target=_ibkr_background_thread, daemon=True)
-_bg_thread.start()
-logger.info("IBKR background thread started (daemon)")
-
-# Also setup fallback polling every 30s in case events don't fire
-def _fallback_update_loop():
-    """Fallback: periodically collect and post data"""
+def _ws_update_loop():
+    """Infinite loop for WebSocket updates - collects IBKR data and POSTs to backend every FALLBACK_INTERVAL seconds"""
     while True:
-        try:
-            time.sleep(FALLBACK_INTERVAL)
-            _collect_and_post()
-        except Exception as e:
-            logger.error(f"Fallback update loop error: {e}")
+        time.sleep(FALLBACK_INTERVAL)
+        _collect_and_post()
 
-_fallback_thread = threading.Thread(target=_fallback_update_loop, daemon=True)
-_fallback_thread.start()
-logger.info("Fallback update thread started (daemon)")
+_ws_thread = threading.Thread(target=_ws_update_loop, daemon=True)
+_ws_thread.start()
+logger.info(f"WebSocket push thread started (interval: {FALLBACK_INTERVAL}s)")
 
 # ======================
 # HEALTH CHECK ENDPOINT
@@ -213,7 +212,6 @@ logger.info("Fallback update thread started (daemon)")
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
-    ensure_ibkr_connected()
     connector = get_connector()
     return jsonify({
         'status': 'healthy',
@@ -232,7 +230,7 @@ def account_summary():
         connector = get_connector()
         return await connector.get_account_summary()
 
-    data = loop.run_until_complete(get_data())
+    data = _ib_call(get_data())
     return jsonify(data)
 
 # ======================
@@ -246,7 +244,7 @@ def get_positions():
         connector = get_connector()
         return await connector.get_positions()
 
-    positions = loop.run_until_complete(get_data())
+    positions = _ib_call(get_data())
     return jsonify(positions)
 
 # ======================
@@ -260,7 +258,7 @@ def get_open_orders():
         connector = get_connector()
         return await connector.get_open_orders()
 
-    orders = loop.run_until_complete(get_data())
+    orders = _ib_call(get_data())
     return jsonify(orders)
 
 @app.route('/orders', methods=['POST'])
@@ -277,7 +275,7 @@ def submit_order():
             price=data.get('price')
         )
 
-    result = loop.run_until_complete(submit())
+    result = _ib_call(submit())
 
     if result:
         return jsonify(result), 200
@@ -291,7 +289,7 @@ def cancel_order(order_id):
         connector = get_connector()
         return await connector.cancel_order(order_id)
 
-    success = loop.run_until_complete(cancel())
+    success = _ib_call(cancel())
 
     if success:
         return jsonify({'status': 'cancelled'}), 200
@@ -309,7 +307,7 @@ def get_market_data(symbol):
         connector = get_connector()
         return await connector.get_market_data(symbol)
 
-    data = loop.run_until_complete(get_data())
+    data = _ib_call(get_data())
 
     if data:
         return jsonify(data), 200
@@ -326,7 +324,7 @@ def get_historical_data(symbol):
         connector = get_connector()
         return await connector.get_historical_data(symbol, bar_size, duration)
 
-    data = loop.run_until_complete(get_data())
+    data = _ib_call(get_data())
     return jsonify(data)
 
 # ======================
@@ -373,12 +371,44 @@ def execute_signal():
             order_type='MKT'
         )
 
-    result = loop.run_until_complete(execute())
+    result = _ib_call(execute())
 
     if result:
         return jsonify(result), 200
     else:
         return jsonify({'error': 'Execution failed'}), 400
+
+# ======================
+# SCHEDULER / AUTOMATED SCANNING
+# ======================
+
+@app.route('/scan/trigger', methods=['GET'])
+def trigger_scan():
+    """Manually trigger the daily scan immediately"""
+    try:
+        logger.info("Manual scan triggered via API")
+        results = run_daily_scan()
+        return jsonify({
+            'success': True,
+            'message': f'Scan completed: {len(results)} signals found',
+            'signals': results
+        }), 200
+    except Exception as e:
+        logger.error(f"Scan trigger failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/scan/status', methods=['GET'])
+def scan_status():
+    """Get status of last scan"""
+    try:
+        status = get_scan_status()
+        return jsonify({
+            'success': True,
+            'data': status
+        }), 200
+    except Exception as e:
+        logger.error(f"Failed to get scan status: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ======================
 # ERROR HANDLERS
@@ -400,4 +430,13 @@ def server_error(error):
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 6105))
     logger.info(f"Starting Python service on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+
+    # IBKR is already connected in the dedicated event loop thread
+    # Scheduler is already started at module level (works for all deployment methods)
+
+    try:
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    finally:
+        # Cleanup on shutdown
+        stop_scheduler()
+        logger.info("Python service shutdown complete")

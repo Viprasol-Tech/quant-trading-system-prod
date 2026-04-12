@@ -10,6 +10,7 @@ import { riskRoutes } from './risk';
 import { setupComplianceRoutes } from './compliance';
 import { wsRoutes } from './ws';
 import { systemRoutes } from './system';
+import { backtestRoutes } from './backtest';
 
 export async function setupRoutes(app: FastifyInstance) {
   logger.info('Setting up API routes...');
@@ -49,6 +50,10 @@ export async function setupRoutes(app: FastifyInstance) {
     // Register WebSocket routes
     await app.register(wsRoutes);
     logger.info('✓ WebSocket routes registered');
+
+    // Register Backtest routes (Phase 4)
+    await app.register(backtestRoutes);
+    logger.info('✓ Backtest routes registered');
 
     logger.info('All routes registered successfully');
   } catch (error) {

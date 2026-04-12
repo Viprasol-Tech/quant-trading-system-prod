@@ -1,3 +1,11 @@
+/**
+ * @deprecated DO NOT USE
+ * This file contains MOCK/FAKE implementations only.
+ * Use PythonServiceClient (../../services/PythonServiceClient) for all IBKR data.
+ * This file is kept only to avoid breaking TypeScript compilation.
+ * It will be removed in a future cleanup.
+ */
+
 import Decimal from 'decimal.js';
 import { logger } from '../config/logger';
 import { config } from '../config/environment';

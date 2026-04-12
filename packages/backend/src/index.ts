@@ -6,6 +6,9 @@ import { logger } from './config/logger';
 import { config } from './config/environment';
 import { setupRoutes } from './api/routes';
 import { errorHandler } from './api/middleware/errorHandler';
+import db from './database/db'; // Initialize database on startup
+
+logger.info(`Database initialized: ${process.env.DB_PATH || './data/trading.db'}`);
 
 const app = Fastify({
   logger: true,

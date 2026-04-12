@@ -116,29 +116,6 @@ const STRATEGIES = [
       confirmationRequired: true,
     },
   },
-  {
-    id: "strategy-4-breakout",
-    name: "Strategy 4: Breakout",
-    description: "Donchian channel breakouts",
-    type: "breakout",
-    parameters: {
-      period: 20,
-      atrMultiplier: 2,
-      volumeConfirm: true,
-    },
-  },
-  {
-    id: "strategy-5-scalping",
-    name: "Strategy 5: Scalping",
-    description: "Short-term scalping with tight stops",
-    type: "scalping",
-    parameters: {
-      timeframe: "5m",
-      maxHoldingPeriod: 30,
-      targetPercent: 0.5,
-      stopPercent: 0.25,
-    },
-  },
 ];
 
 function formatCurrency(value: number) {

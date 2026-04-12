@@ -7,11 +7,54 @@ from ib_insync import IB, Stock, Contract, Order, util
 import asyncio
 import logging
 import os
+import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class MarketDataSubscriptionTracker:
+    """
+    Track active market data subscriptions to prevent exceeding IBKR's limit.
+    IBKR typically allows ~100 concurrent market data subscriptions per connection.
+    """
+    MAX_SUBSCRIPTIONS = 95  # Conservative limit, actual is ~100
+
+    def __init__(self):
+        self.subscriptions = {}  # {symbol: count}
+        self.total = 0
+
+    def request(self, symbol: str) -> bool:
+        """Request a market data subscription. Returns True if allowed, False if at limit."""
+        if self.total >= self.MAX_SUBSCRIPTIONS:
+            logger.warning(f"Market data subscription limit reached ({self.total}/{self.MAX_SUBSCRIPTIONS})")
+            return False
+
+        self.subscriptions[symbol] = self.subscriptions.get(symbol, 0) + 1
+        self.total += 1
+        logger.debug(f"Market data subscription requested: {symbol} (total: {self.total})")
+        return True
+
+    def cancel(self, symbol: str) -> None:
+        """Cancel a market data subscription."""
+        if symbol in self.subscriptions:
+            self.subscriptions[symbol] -= 1
+            if self.subscriptions[symbol] <= 0:
+                del self.subscriptions[symbol]
+            self.total -= 1
+            logger.debug(f"Market data subscription cancelled: {symbol} (total: {self.total})")
+
+    def get_usage(self) -> Dict[str, int]:
+        """Get current subscription usage."""
+        return {
+            'total': self.total,
+            'max': self.MAX_SUBSCRIPTIONS,
+            'usage_percent': (self.total / self.MAX_SUBSCRIPTIONS) * 100 if self.MAX_SUBSCRIPTIONS > 0 else 0,
+            'symbols': len(self.subscriptions)
+        }
+
 
 class IBKRConnector:
     """Complete IBKR integration for trading system"""
@@ -24,6 +67,8 @@ class IBKRConnector:
         self.connected = False
         self.positions_cache = {}
         self.orders_cache = {}
+        self.market_data_type = 4  # Request delayed/frozen data by default
+        self.subscriptions = MarketDataSubscriptionTracker()
 
     async def connect(self, retries=8):
         """Connect to IBKR Gateway with exponential backoff retry logic"""
@@ -31,21 +76,51 @@ class IBKRConnector:
             try:
                 logger.info(f"Connecting to IBKR ({attempt+1}/{retries})...")
 
-                # Use async connection with timeout
+                # Pre-connection delay: give gateway API time to fully initialize
+                # Especially important on first attempt right after IBC login completes
+                if attempt == 0:
+                    logger.info("Gateway freshly started, waiting for API initialization (5 sec)...")
+                    await asyncio.sleep(5)
+
+                # Use async connection with increased timeout (30s instead of 20s)
                 await self.ib.connectAsync(
                     host=self.host,
                     port=self.port,
                     clientId=self.client_id,
                     readonly=False,
-                    timeout=20
+                    timeout=30
                 )
 
                 logger.info(f"✅ Connected to IBKR Gateway on {self.host}:{self.port}")
+
+                # WARMUP: Give API time to stabilize after connection
+                logger.info("Warming up API (waiting for full initialization)...")
+                await asyncio.sleep(3)
+
+                # WARMUP REQUEST: Verify API is functional before proceeding
+                try:
+                    logger.info("Sending warmup request to verify API readiness...")
+                    managed = await asyncio.wait_for(
+                        asyncio.to_thread(self.ib.managedAccounts),
+                        timeout=5
+                    )
+                    logger.info(f"✅ API warmup successful - Account ID: {managed[0] if managed else 'N/A'}")
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ API warmup timeout, but continuing (retry will happen if needed)...")
+                except Exception as e:
+                    logger.warning(f"⚠️ API warmup request failed: {e}, but continuing...")
+
                 self.connected = True
 
-                # Request market data type 4 (delayed-frozen data)
-                self.ib.reqMarketDataType(4)
-                logger.info("Market data type requested: 4 (delayed-frozen)")
+                # Request market data type: prefer 4 (delayed-frozen), fallback to 1 (realtime)
+                try:
+                    self.ib.reqMarketDataType(self.market_data_type)
+                    logger.info(f"Market data type requested: {self.market_data_type} (delayed-frozen)")
+                except Exception as e:
+                    logger.warning(f"Failed to request market data type {self.market_data_type}: {e}")
+                    logger.info("Falling back to market data type 1 (realtime)")
+                    self.market_data_type = 1
+                    self.ib.reqMarketDataType(self.market_data_type)
 
                 # Get managed accounts (paper accounts need explicit ID)
                 try:
@@ -87,6 +162,18 @@ class IBKRConnector:
             logger.info("✅ Initialization complete")
         except Exception as e:
             logger.error(f"Initialization error: {e}")
+
+    def _get_valid_price(self, *candidates: float) -> Optional[float]:
+        """
+        Return first valid (non-nan, positive) price from candidates.
+        Handles ib_insync's use of float('nan') for missing values.
+        Python's 'or' operator treats 0.0 as falsy, causing incorrect fallback.
+        This method explicitly checks for NaN and negative values.
+        """
+        for price in candidates:
+            if price is not None and not math.isnan(price) and price > 0:
+                return price
+        return None
 
     def register_event_callbacks(self, on_update):
         """Register callbacks for IBKR events"""
@@ -141,7 +228,7 @@ class IBKRConnector:
             return {}
 
     async def get_positions(self) -> Dict:
-        """Get current positions from IBKR"""
+        """Get current positions from IBKR with real-time market data"""
         if not self.connected:
             return {}
 
@@ -151,15 +238,67 @@ class IBKRConnector:
             position_dict = {}
             for pos in positions:
                 symbol = pos.contract.symbol
+                quantity = pos.position
+                avg_cost = pos.avgCost
+
+                # Request market data for this position to get current price
+                current_price = None
+                try:
+                    contract = Stock(symbol, 'SMART', 'USD')
+                    self.ib.qualifyContracts(contract)
+
+                    # Check subscription limit before requesting market data
+                    if not self.subscriptions.request(symbol):
+                        logger.warning(f"Market data subscription limit reached, using avg_cost for {symbol}")
+                        current_price = avg_cost
+                    else:
+                        try:
+                            # Request market data (uses configured market data type)
+                            ticker = self.ib.reqMktData(contract, '', False, False)
+
+                            # Wait up to 2 seconds for ticker data to arrive (ib_insync handles async internally)
+                            await asyncio.sleep(2)
+
+                            # Use valid price (non-nan, positive) with fallback chain
+                            current_price = self._get_valid_price(
+                                ticker.last,
+                                ticker.close,
+                                ticker.bid,
+                                avg_cost
+                            ) or avg_cost
+
+                        finally:
+                            # Cancel market data subscription to avoid hitting limit
+                            try:
+                                self.ib.cancelMktData(contract)
+                                self.subscriptions.cancel(symbol)
+                            except Exception as e:
+                                logger.warning(f"Failed to cancel market data for {symbol}: {e}")
+
+                except Exception as e:
+                    logger.warning(f"Failed to get market data for {symbol}: {e}, using avg_cost")
+                    current_price = avg_cost
+
+                # Calculate financial metrics
+                market_value = quantity * current_price if current_price else 0
+                cost_basis = quantity * avg_cost if avg_cost else 0
+                unrealized_pl = market_value - cost_basis
+                unrealized_plpc = (unrealized_pl / cost_basis * 100) if cost_basis else 0
+
                 position_dict[symbol] = {
                     'symbol': symbol,
-                    'quantity': pos.position,
-                    'avg_cost': pos.avgCost,
+                    'qty': str(quantity),
+                    'avg_entry_price': str(avg_cost) if avg_cost else '0',
+                    'current_price': str(current_price) if current_price else '0',
+                    'market_value': str(market_value),
+                    'unrealized_pl': str(unrealized_pl),
+                    'unrealized_plpc': str(unrealized_plpc),
                     'account': pos.account,
+                    'side': 'long' if quantity > 0 else 'short'
                 }
 
             self.positions_cache = position_dict
-            logger.info(f"Updated {len(positions)} positions")
+            logger.info(f"Updated {len(positions)} positions with market data")
             return position_dict
         except Exception as e:
             logger.error(f"Error getting positions: {e}")
@@ -245,27 +384,44 @@ class IBKRConnector:
             return False
 
     async def get_market_data(self, symbol: str) -> Optional[Dict]:
-        """Get real-time market data"""
+        """Get market data with subscription tracking and type fallback"""
         if not self.connected:
             return None
 
         try:
             contract = Stock(symbol, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
-            self.ib.reqMktData(contract)
 
-            await asyncio.sleep(2)
+            # Check subscription limit
+            if not self.subscriptions.request(symbol):
+                logger.warning(f"Market data subscription limit reached for {symbol}")
+                return None
 
-            return {
-                'symbol': symbol,
-                'last': contract.last,
-                'bid': contract.bid,
-                'ask': contract.ask,
-                'volume': contract.volume,
-                'timestamp': datetime.now().isoformat(),
-            }
+            try:
+                # Request market data (uses configured market data type: 4 or 1)
+                ticker = self.ib.reqMktData(contract, '', False, False)
+
+                # Wait up to 2 seconds for ticker data to arrive
+                await asyncio.sleep(2)
+
+                return {
+                    'symbol': symbol,
+                    'last': self._get_valid_price(ticker.last) or 0,
+                    'bid': self._get_valid_price(ticker.bid) or 0,
+                    'ask': self._get_valid_price(ticker.ask) or 0,
+                    'volume': ticker.volume or 0,
+                    'timestamp': datetime.now().isoformat(),
+                }
+            finally:
+                # Cancel subscription
+                try:
+                    self.ib.cancelMktData(contract)
+                    self.subscriptions.cancel(symbol)
+                except Exception as e:
+                    logger.warning(f"Failed to cancel market data for {symbol}: {e}")
+
         except Exception as e:
-            logger.error(f"Error getting market data: {e}")
+            logger.error(f"Error getting market data for {symbol}: {e}")
             return None
 
     async def get_historical_data(self, symbol: str, bar_size: str = '1 day',

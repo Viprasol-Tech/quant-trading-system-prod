@@ -3,12 +3,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:6005/api";
 // Types
 export interface Position {
   symbol: string;
-  quantity: number;
-  avgCost: number;
-  marketPrice: number;
-  marketValue: number;
-  unrealizedPnL: number;
-  realizedPnL: number;
+  qty: string;
+  avg_entry_price: string;
+  current_price: string;
+  market_value: string;
+  unrealized_pl: string;
+  unrealized_plpc: string;
+  account: string;
+  side: 'long' | 'short';
 }
 
 export interface Order {
@@ -159,7 +161,8 @@ class ApiClient {
   }
 
   async getPositions(): Promise<Position[]> {
-    return this.request("/portfolio/positions");
+    const response = await this.request<Record<string, Position>>("/positions");
+    return Object.values(response);
   }
 
   // Orders

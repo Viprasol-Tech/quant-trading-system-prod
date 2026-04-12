@@ -5,11 +5,20 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install production dependencies only
-RUN npm install --legacy-peer-deps && npm prune --omit=dev --legacy-peer-deps
+# Install all dependencies (including dev for build)
+RUN npm install --legacy-peer-deps
 
-# Copy pre-built .next folder
-COPY .next ./.next
+# Copy source code
+COPY tsconfig.json ./
+COPY src ./src
+COPY public ./public
+COPY next.config.js ./next.config.js || true
+
+# Build the application
+RUN npm run build
+
+# Remove dev dependencies
+RUN npm prune --omit=dev --legacy-peer-deps
 
 EXPOSE 6205
 

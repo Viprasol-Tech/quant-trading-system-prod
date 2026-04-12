@@ -3,6 +3,7 @@ import { TrendBreakoutStrategy } from '../../strategies/TrendBreakoutStrategy';
 import { PullbackReversionStrategy } from '../../strategies/PullbackReversionStrategy';
 import { HybridCompositeStrategy } from '../../strategies/HybridCompositeStrategy';
 import { logger } from '../../config/logger';
+import db from '../../database/db';
 
 // Strategy instances
 const strategies = {
@@ -123,26 +124,80 @@ export async function strategiesRoutes(fastify: FastifyInstance) {
 
   /**
    * GET /api/strategies/:id/performance
-   * Get performance metrics - REQUIRES DATABASE
+   * Get performance metrics from backtest_runs table
    * Returns error if no backtest data exists
    */
   fastify.get('/api/strategies/:id/performance', async (request: FastifyRequest<{
     Params: { id: string }
   }>, reply: FastifyReply) => {
-    const { id } = request.params;
+    try {
+      const { id } = request.params;
+      const idLower = id.toLowerCase();
 
-    // TODO: Connect to database to get real backtest/trading performance
-    // For now, return an error indicating no data available
-    
-    logger.warn(`Performance data requested for ${id} but no database connected`);
-
-    return reply.status(503).send({
-      success: false,
-      error: {
-        code: 'NO_PERFORMANCE_DATA',
-        message: 'Performance data requires historical backtest results stored in database. Run backtests first.'
+      // Map frontend ID to DB strategy_id patterns
+      let strategyPattern = idLower;
+      if (idLower === 's1' || idLower.includes('momentum') || idLower.includes('trend')) {
+        strategyPattern = 'strategy-1%';
+      } else if (idLower === 's2' || idLower.includes('reversion') || idLower.includes('pullback')) {
+        strategyPattern = 'strategy-2%';
+      } else if (idLower === 's3' || idLower.includes('hybrid')) {
+        strategyPattern = 'strategy-3%';
       }
-    });
+
+      // Query backtest results grouped by strategy
+      const stmt = db.prepare(`
+        SELECT
+          COUNT(*) as total_runs,
+          AVG(total_return_pct) as avg_return_pct,
+          AVG(max_drawdown) as avg_max_drawdown,
+          AVG(sharpe_ratio) as avg_sharpe,
+          AVG(win_rate) as avg_win_rate,
+          AVG(profit_factor) as avg_profit_factor,
+          MAX(total_return_pct) as best_return,
+          MIN(total_return_pct) as worst_return,
+          MAX(created_at) as last_run
+        FROM backtest_runs
+        WHERE strategy_id LIKE ?
+      `);
+
+      const perf = stmt.get(strategyPattern) as any;
+
+      if (!perf || perf.total_runs === 0) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_PERFORMANCE_DATA',
+            message: 'No backtest runs found for this strategy. Run a backtest first.'
+          }
+        });
+      }
+
+      return reply.status(200).send({
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          strategyId: id,
+          totalRuns: perf.total_runs,
+          avgReturnPct: Math.round(perf.avg_return_pct * 100) / 100,
+          avgMaxDrawdown: Math.round(perf.avg_max_drawdown * 100) / 100,
+          avgSharpe: Math.round(perf.avg_sharpe * 100) / 100,
+          avgWinRate: Math.round(perf.avg_win_rate * 100) / 100,
+          avgProfitFactor: Math.round(perf.avg_profit_factor * 100) / 100,
+          bestReturn: Math.round(perf.best_return * 100) / 100,
+          worstReturn: Math.round(perf.worst_return * 100) / 100,
+          lastRun: perf.last_run
+        }
+      });
+    } catch (error: any) {
+      logger.error('Strategy performance fetch failed:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'DB_ERROR',
+          message: error.message || 'Failed to fetch performance metrics'
+        }
+      });
+    }
   });
 
   /**

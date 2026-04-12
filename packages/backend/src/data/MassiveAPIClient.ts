@@ -22,7 +22,8 @@ export interface MassiveResponse {
 
 export class MassiveAPIClient {
   private client: AxiosInstance;
-  private cache: Map<string, OHLCV[]> = new Map();
+  private cache: Map<string, { data: OHLCV[]; timestamp: number }> = new Map();
+  private readonly CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
   constructor(apiKey: string = config.massive.apiKey) {
     this.client = axios.create({
@@ -44,6 +45,28 @@ export class MassiveAPIClient {
         throw error;
       }
     );
+
+    // Periodic cache cleanup every 6 hours
+    setInterval(() => this.cleanupExpiredCache(), 6 * 60 * 60 * 1000);
+  }
+
+  /**
+   * Clean up expired cache entries
+   */
+  private cleanupExpiredCache(): void {
+    const now = Date.now();
+    let deletedCount = 0;
+
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > this.CACHE_TTL) {
+        this.cache.delete(key);
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      logger.debug(`Cache cleanup: removed ${deletedCount} expired entries`);
+    }
   }
 
   /**
@@ -58,10 +81,19 @@ export class MassiveAPIClient {
   ): Promise<OHLCV[]> {
     const cacheKey = `${ticker}-${multiplier}-${timespan}-${from}-${to}`;
 
-    // Check cache
+    // Check cache (and validate TTL)
     if (this.cache.has(cacheKey)) {
-      logger.debug(`Cache hit for ${cacheKey}`);
-      return this.cache.get(cacheKey)!;
+      const cached = this.cache.get(cacheKey)!;
+      const age = Date.now() - cached.timestamp;
+
+      if (age < this.CACHE_TTL) {
+        logger.debug(`Cache hit for ${cacheKey} (age: ${(age / 1000).toFixed(0)}s)`);
+        return cached.data;
+      } else {
+        // Expired, remove from cache
+        this.cache.delete(cacheKey);
+        logger.debug(`Cache expired for ${cacheKey}`);
+      }
     }
 
     try {
@@ -79,8 +111,10 @@ export class MassiveAPIClient {
         }
       );
 
-      if (response.data.status !== 'OK' || !response.data.results) {
-        logger.warn(`No data returned for ${ticker}`);
+      // Accept both OK and DELAYED statuses - DELAYED means data is 15 minutes delayed but still valid
+      const validStatuses = ['OK', 'DELAYED'];
+      if (!validStatuses.includes(response.data.status) || !response.data.results) {
+        logger.warn(`No data returned for ${ticker} (status: ${response.data.status})`);
         return [];
       }
 
@@ -93,8 +127,8 @@ export class MassiveAPIClient {
         volume: bar.v
       }));
 
-      // Cache result
-      this.cache.set(cacheKey, ohlcv);
+      // Cache result with timestamp
+      this.cache.set(cacheKey, { data: ohlcv, timestamp: Date.now() });
 
       logger.info(`Retrieved ${ohlcv.length} bars for ${ticker}`);
       return ohlcv;
@@ -192,6 +226,7 @@ export class MassiveAPIClient {
 
   /**
    * Get quote for a ticker
+   * Note: /v1/last/quote may return 404 on free tier - fallback to daily bars instead
    */
   async getQuote(ticker: string): Promise<{
     bid: number;
@@ -202,7 +237,9 @@ export class MassiveAPIClient {
     try {
       const response = await this.client.get(`/v1/last/quote/${ticker}`);
 
-      if (response.data.status === 'OK' && response.data.last) {
+      // Accept both OK and DELAYED statuses
+      const validStatuses = ['OK', 'DELAYED'];
+      if (validStatuses.includes(response.data.status) && response.data.last) {
         const { bid, ask } = response.data.last;
         return {
           bid,
@@ -213,8 +250,13 @@ export class MassiveAPIClient {
       }
 
       return null;
-    } catch (error) {
-      logger.error(`Failed to get quote for ${ticker}:`, error);
+    } catch (error: any) {
+      // /v1/last/quote returns 404 on free tier - this is expected
+      if (error.response?.status === 404) {
+        logger.debug(`Quote endpoint not available for ${ticker} (free tier limitation)`);
+      } else {
+        logger.error(`Failed to get quote for ${ticker}:`, error.message);
+      }
       return null;
     }
   }
@@ -236,10 +278,34 @@ export class MassiveAPIClient {
   }
 
   /**
-   * Get cache size
+   * Get cache size and statistics
    */
   getCacheSize(): number {
+    // Clean up expired entries first
+    this.cleanupExpiredCache();
     return this.cache.size;
+  }
+
+  /**
+   * Get detailed cache statistics
+   */
+  getCacheStats(): {
+    size: number;
+    entries: Array<{ key: string; ageMs: number; ageDays: string }>;
+  } {
+    const now = Date.now();
+    const entries = Array.from(this.cache.entries())
+      .map(([key, value]) => ({
+        key,
+        ageMs: now - value.timestamp,
+        ageDays: ((now - value.timestamp) / (24 * 60 * 60 * 1000)).toFixed(1)
+      }))
+      .sort((a, b) => b.ageMs - a.ageMs);
+
+    return {
+      size: this.cache.size,
+      entries
+    };
   }
 
   /**

@@ -43,24 +43,6 @@ export default function StrategiesPage() {
       parameters: { momentumWeight: 0.6, reversionWeight: 0.4 },
       performance: { totalTrades: 234, winRate: 0.58, profitFactor: 1.65, sharpeRatio: 1.25, maxDrawdown: 0.12 },
     },
-    {
-      id: "strategy-4-breakout",
-      name: "Strategy 4: Breakout",
-      type: "breakout",
-      enabled: true,
-      symbols: ["TSLA", "NVDA"],
-      parameters: { period: 20, atrMultiplier: 2 },
-      performance: { totalTrades: 67, winRate: 0.48, profitFactor: 2.35, sharpeRatio: 1.55, maxDrawdown: 0.15 },
-    },
-    {
-      id: "strategy-5-scalping",
-      name: "Strategy 5: Scalping",
-      type: "scalping",
-      enabled: false,
-      symbols: ["SPY"],
-      parameters: { timeframe: "5m", targetPercent: 0.5 },
-      performance: { totalTrades: 512, winRate: 0.55, profitFactor: 1.35, sharpeRatio: 0.95, maxDrawdown: 0.03 },
-    },
   ];
 
   const displayStrategies = strategies?.length ? strategies : fallbackStrategies;

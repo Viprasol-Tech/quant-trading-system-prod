@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { WebSocket } from 'ws';
 import { logger } from '../../config/logger';
 import { wsManager } from '../../services/wsManager';
-import IBKRClient from '../../broker/IBKRClient';
+import { pythonService } from '../../services/PythonServiceClient';
 
 interface WsUpdatePayload {
   type: string;
@@ -37,21 +37,20 @@ interface WsUpdatePayload {
 
 async function getSnapshotData(): Promise<WsUpdatePayload> {
   try {
-    const broker = IBKRClient;
-    const account = await broker.getAccount();
-    const positions = await broker.getPositions();
-    const orders = await broker.getOrders({});
+    const account = await pythonService.getAccountSummary();
+    const positions = await pythonService.getPositions();
+    const orders = await pythonService.getOrders();
 
     return {
       type: 'portfolio_update',
       timestamp: new Date().toISOString(),
       data: {
         portfolio: {
-          totalEquity: account.equity?.toString() || '0',
-          cash: account.cash?.toString() || '0',
-          buyingPower: account.buying_power?.toString() || '0',
-          dayPnL: account.day_trading_buying_power?.toString() || '0',
-          unrealizedPnL: account.gross_position_value?.toString() || '0'
+          totalEquity: account?.net_liquidation || '0',
+          cash: account?.total_cash || '0',
+          buyingPower: account?.buying_power || '0',
+          dayPnL: '0',  // Python service doesn't provide day PnL yet
+          unrealizedPnL: account?.gross_position_value || '0'
         },
         positions: positions.map((pos: any) => ({
           symbol: pos.symbol,
@@ -59,8 +58,8 @@ async function getSnapshotData(): Promise<WsUpdatePayload> {
           avg_entry_price: pos.avg_entry_price?.toString(),
           current_price: pos.current_price?.toString(),
           market_value: pos.market_value?.toString() || '0',
-          unrealized_pl: pos.unrealized_gain?.toString() || '0',
-          unrealized_plpc: pos.unrealized_gain_pct?.toString() || '0'
+          unrealized_pl: pos.unrealized_pl?.toString() || '0',
+          unrealized_plpc: pos.unrealized_plpc?.toString() || '0'
         })),
         orders: orders.map((order: any) => ({
           id: order.order_id,

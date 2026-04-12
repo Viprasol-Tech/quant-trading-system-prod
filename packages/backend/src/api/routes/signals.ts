@@ -6,6 +6,7 @@ import { TechnicalAnalysisEngine } from '../../engine/TechnicalAnalysisEngine';
 import { MassiveAPIClient } from '../../data/MassiveAPIClient';
 import { ShariahScreener } from '../../shariah/ShariahScreener';
 import { logger } from '../../config/logger';
+import db from '../../database/db';
 import Decimal from 'decimal.js';
 
 // Initialize services
@@ -351,6 +352,65 @@ export async function signalsRoutes(fastify: FastifyInstance) {
         error: {
           code: 'EXECUTION_FAILED',
           message: error.message || 'Failed to execute signal'
+        }
+      });
+    }
+  });
+
+  /**
+   * GET /api/signals/active/:symbol
+   * Get the most recent acted-on signal for a symbol from signals_log
+   * Used by scheduler monitor_positions() to check SL/TP levels
+   */
+  fastify.get('/api/signals/active/:symbol', async (request: FastifyRequest<{
+    Params: { symbol: string }
+  }>, reply: FastifyReply) => {
+    try {
+      const { symbol } = request.params;
+      const upperSymbol = symbol.toUpperCase();
+
+      // Query signals_log for most recent acted-on signal
+      const stmt = db.prepare(`
+        SELECT * FROM signals_log
+        WHERE symbol = ? AND acted_on = 1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+
+      const signal = stmt.get(upperSymbol) as any;
+
+      if (!signal) {
+        return reply.status(200).send({
+          success: true,
+          data: null
+        });
+      }
+
+      return reply.status(200).send({
+        success: true,
+        data: {
+          id: signal.id,
+          symbol: signal.symbol,
+          strategy: signal.strategy,
+          direction: signal.direction,
+          entry_price: parseFloat(signal.entry_price || 0),
+          stop_loss: parseFloat(signal.stop_loss || 0),
+          take_profit: parseFloat(signal.take_profit || 0),
+          confidence: signal.confidence,
+          rating: signal.rating,
+          shariah_compliant: signal.shariah_compliant === 1,
+          acted_on: signal.acted_on === 1,
+          order_id: signal.order_id,
+          created_at: signal.created_at
+        }
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch active signal:', error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'DB_ERROR',
+          message: error.message || 'Failed to fetch signal'
         }
       });
     }

@@ -1,8 +1,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../../config/logger';
 import { pythonService } from '../../services/PythonServiceClient';
+import { ShariahScreener } from '../../shariah/ShariahScreener';
 
 export async function ordersRoutes(app: FastifyInstance) {
+  const screener = new ShariahScreener();
 
   /**
    * GET /api/orders - Get all orders - REAL DATA from IBKR
@@ -174,6 +176,19 @@ export async function ordersRoutes(app: FastifyInstance) {
           error: {
             code: 'INVALID_ORDER',
             message: 'Limit price required for LMT orders'
+          }
+        });
+      }
+
+      // Check Shariah compliance BEFORE submitting order
+      if (screener.isProhibitedCompany(symbol.toUpperCase())) {
+        logger.warn(`Order rejected: ${symbol} is Shariah non-compliant`);
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'SHARIAH_NON_COMPLIANT',
+            message: `Symbol ${symbol.toUpperCase()} is not Shariah-compliant and cannot be traded`,
+            symbol: symbol.toUpperCase()
           }
         });
       }

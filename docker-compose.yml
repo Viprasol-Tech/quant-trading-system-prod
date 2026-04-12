@@ -22,11 +22,11 @@ services:
     networks:
       - trading-network
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 4002 2>/dev/null && echo 'OK' || exit 1"]
+      test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/localhost/4002' 2>/dev/null && echo 'OK' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 180s
+      start_period: 240s
 
   # PostgreSQL Database
   postgres:
@@ -69,6 +69,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ib-gateway:
+        condition: service_healthy
     networks:
       - trading-network
     healthcheck:
@@ -76,7 +78,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
   # Fastify Backend
   backend:

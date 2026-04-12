@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { config } from '../config/environment';
 import { logger } from '../config/logger';
 import { TradeSignal, TradePlan, Position } from '../types';
+import db from '../database/db';
 
 export class RiskManager {
   private peakEquity: Decimal = new Decimal(0);
@@ -45,6 +46,49 @@ export class RiskManager {
     );
 
     logger.info('RiskManager initialized with environment parameters');
+
+    // Load peak_equity from database
+    this.loadPeakEquity();
+  }
+
+  /**
+   * Load peak_equity from database (called on startup)
+   */
+  private loadPeakEquity(): void {
+    try {
+      const stmt = db.prepare('SELECT value FROM system_state WHERE key = ?');
+      const row = stmt.get('peak_equity') as any;
+
+      if (row && row.value) {
+        this.peakEquity = new Decimal(row.value);
+        logger.info(`Loaded peak_equity from database: ${this.peakEquity}`);
+      } else {
+        logger.info('No peak_equity found in database, starting fresh');
+      }
+    } catch (error) {
+      logger.error('Failed to load peak_equity from database:', error);
+      // Continue with default value
+    }
+  }
+
+  /**
+   * Save peak_equity to database
+   */
+  private savePeakEquity(): void {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO system_state (key, value, updated_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = datetime('now')
+      `);
+
+      stmt.run('peak_equity', this.peakEquity.toString());
+    } catch (error) {
+      logger.warn('Failed to save peak_equity to database:', error);
+      // Continue anyway - don't let DB failure stop trading
+    }
   }
 
   /**
@@ -163,6 +207,8 @@ export class RiskManager {
   updateDrawdown(currentEquity: Decimal): void {
     if (currentEquity.greaterThan(this.peakEquity)) {
       this.peakEquity = currentEquity;
+      // Save new peak equity to database
+      this.savePeakEquity();
     }
 
     this.currentDrawdown = this.peakEquity
