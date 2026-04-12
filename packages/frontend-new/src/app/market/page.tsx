@@ -28,9 +28,12 @@ export default function MarketDataPage() {
   const [search, setSearch] = useState("");
   const { data: marketData, isLoading, error } = useMarketData(DEFAULT_SYMBOLS);
 
-  const filteredData = marketData?.filter((item) =>
-    item.symbol.toLowerCase().includes(search.toLowerCase())
-  );
+  // Filter out error responses and search results
+  const filteredData = marketData
+    ?.filter((item: any) => !item.error && item.bid !== undefined) // Only valid quotes
+    .filter((item) =>
+      item.symbol.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
     <div className="space-y-6">

@@ -73,17 +73,19 @@ export interface Strategy {
 
 export interface MarketData {
   symbol: string;
-  bid: number;
-  ask: number;
-  last: number;
-  volume: number;
-  high: number;
-  low: number;
-  open: number;
-  close: number;
-  change: number;
-  changePercent: number;
-  timestamp: string;
+  bid?: number;
+  ask?: number;
+  last?: number;
+  volume?: number;
+  high?: number;
+  low?: number;
+  open?: number;
+  close?: number;
+  change?: number;
+  changePercent?: number;
+  timestamp?: string;
+  source?: 'IBKR' | 'POLYGON';
+  error?: string;
 }
 
 export interface BacktestResult {
@@ -206,7 +208,10 @@ class ApiClient {
 
   // Market Data
   async getMarketData(symbols: string[]): Promise<MarketData[]> {
-    return this.request(`/data/quotes?symbols=${symbols.join(",")}`);
+    const response = await this.request<{ success: boolean; data: MarketData[]; count: number; error?: string }>(
+      `/data/quotes?symbols=${symbols.join(",")}`
+    );
+    return response.data;
   }
 
   async getHistoricalData(
