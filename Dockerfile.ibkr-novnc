@@ -54,7 +54,7 @@ RUN mkdir -p /opt/ibc/config /home/ibgateway/ibc/logs && \
     mkdir -p /home/ibgateway/ibgateway && \
     ln -sf /home/ibgateway/Jts /home/ibgateway/ibgateway/1037
 
-# IBC Config
+# IBC Config - CRITICAL: Port and API settings for headless Gateway
 RUN cat > /opt/ibc/config.ini << 'CONFIG'
 AcceptIncomingConnectionAccount=Yes
 AcceptNonBrokerageAccountWarning=Yes
@@ -84,6 +84,8 @@ ReconnectDelay=2
 TradeMode=P
 TradingMode=paper
 VerboseLogging=No
+TrustedIPs=127.0.0.1,0.0.0.0
+ForceTwsApiEnable=Yes
 CONFIG
 
 # Copy startup script from root

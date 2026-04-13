@@ -79,17 +79,44 @@ class IBKRConnector:
                 # Pre-connection delay: give gateway API time to fully initialize
                 # Especially important on first attempt right after IBC login completes
                 if attempt == 0:
-                    logger.info("Gateway freshly started, waiting for API initialization (5 sec)...")
-                    await asyncio.sleep(5)
+                    logger.info("Gateway freshly started, waiting for API initialization (10 sec for headless port init)...")
+                    await asyncio.sleep(10)  # Increased wait for headless mode API port initialization
 
-                # Use async connection with increased timeout (30s instead of 20s)
-                await self.ib.connectAsync(
-                    host=self.host,
-                    port=self.port,
-                    clientId=self.client_id,
-                    readonly=False,
-                    timeout=30
-                )
+                # Try multiple clientIds to avoid conflicts
+                client_ids_to_try = [1, 2, 3, 4, 5]
+                connection_successful = False
+
+                for client_id in client_ids_to_try:
+                    try:
+                        logger.info(f"Attempting connection to {self.host}:{self.port} with clientId={client_id}...")
+                        # ib_insync.connect() needs to run IN the ib event loop, not in a thread
+                        # Use a timeout wrapper to detect if connection fails
+                        self.ib.connect(
+                            self.host,
+                            self.port,
+                            client_id,
+                            False  # readonly=False
+                        )
+                        # Wait for connection to establish
+                        await asyncio.sleep(2)
+
+                        # Check if actually connected (ib_insync sets .isConnected attribute)
+                        if hasattr(self.ib, 'isConnected') and self.ib.isConnected():
+                            self.client_id = client_id
+                            logger.info(f"[SUCCESS] Connected with clientId={client_id}")
+                            connection_successful = True
+                            break
+                        else:
+                            logger.warning(f"ClientId {client_id}: TCP connection made but API handshake failed")
+                            self.ib.disconnect()
+                            await asyncio.sleep(1)
+
+                    except Exception as e:
+                        logger.warning(f"ClientId {client_id}: {type(e).__name__}: {str(e)[:100]}")
+                        continue
+
+                if not connection_successful:
+                    raise Exception(f"Failed to establish IBKR connection with any of {len(client_ids_to_try)} clientIds")
 
                 logger.info(f"✅ Connected to IBKR Gateway on {self.host}:{self.port}")
 
