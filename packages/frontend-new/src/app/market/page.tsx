@@ -103,11 +103,11 @@ export default function MarketDataPage() {
                         )}
                         <span
                           className={`font-mono ${
-                            quote.change >= 0 ? "text-green-500" : "text-red-500"
+                            (quote.change ?? 0) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {quote.change >= 0 ? "+" : ""}
-                          {quote.changePercent.toFixed(2)}%
+                          {(quote.change ?? 0) >= 0 ? "+" : ""}
+                          {((quote.changePercent ?? 0).toFixed(2))}%
                         </span>
                       </div>
                     </TableCell>
