@@ -39,7 +39,7 @@ export default function DashboardPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {portfolioLoading ? (
+            {portfolioLoading && !portfolio ? (
               <Skeleton className="h-8 w-32" />
             ) : (
               <>
@@ -64,7 +64,7 @@ export default function DashboardPage() {
             )}
           </CardHeader>
           <CardContent>
-            {riskLoading ? (
+            {riskLoading && !risk ? (
               <Skeleton className="h-8 w-32" />
             ) : (
               <>
@@ -93,7 +93,7 @@ export default function DashboardPage() {
             <Percent className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {riskLoading ? (
+            {riskLoading && !risk ? (
               <Skeleton className="h-8 w-32" />
             ) : (
               <>
@@ -196,7 +196,7 @@ export default function DashboardPage() {
             <CardDescription>Your current holdings</CardDescription>
           </CardHeader>
           <CardContent>
-            {portfolioLoading ? (
+            {portfolioLoading && !portfolio ? (
               <div className="space-y-2">
                 {[...Array(3)].map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full" />
@@ -240,7 +240,7 @@ export default function DashboardPage() {
             <CardDescription>Latest strategy signals</CardDescription>
           </CardHeader>
           <CardContent>
-            {signalsLoading ? (
+            {signalsLoading && !signals ? (
               <div className="space-y-2">
                 {[...Array(3)].map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full" />

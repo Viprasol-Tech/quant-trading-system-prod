@@ -261,6 +261,8 @@ export function usePortfolio() {
     queryKey: ["portfolio"],
     queryFn: () => api.getPortfolio(),
     refetchInterval: 5000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -269,6 +271,8 @@ export function usePositions() {
     queryKey: ["positions"],
     queryFn: () => api.getPositions(),
     refetchInterval: 5000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -277,6 +281,8 @@ export function useOrders() {
     queryKey: ["orders"],
     queryFn: () => api.getOrders(),
     refetchInterval: 5000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -285,6 +291,8 @@ export function useRiskMetrics() {
     queryKey: ["risk"],
     queryFn: () => api.getRiskMetrics(),
     refetchInterval: 5000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -293,6 +301,8 @@ export function useSignals() {
     queryKey: ["signals"],
     queryFn: () => api.getSignals(),
     refetchInterval: 3000,
+    staleTime: 3000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -301,6 +311,8 @@ export function useStrategies() {
     queryKey: ["strategies"],
     queryFn: () => api.getStrategies(),
     refetchInterval: 10000,
+    staleTime: 10000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -320,6 +332,8 @@ export function useSystemStatus() {
     queryKey: ["systemStatus"],
     queryFn: () => api.getSystemStatus(),
     refetchInterval: 5000,
+    staleTime: 5000,
+    placeholderData: (prev) => prev,
   });
 }
 
