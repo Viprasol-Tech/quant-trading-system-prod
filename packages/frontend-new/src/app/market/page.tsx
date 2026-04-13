@@ -92,7 +92,7 @@ export default function MarketDataPage() {
                       <div className="font-medium">{quote.symbol}</div>
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      ${formatPrice(quote.last)}
+                      ${formatPrice(quote.last || 0)}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
