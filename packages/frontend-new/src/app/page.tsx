@@ -215,13 +215,13 @@ export default function DashboardPage() {
                   {portfolio.positions.slice(0, 5).map((pos) => (
                     <TableRow key={pos.symbol}>
                       <TableCell className="font-medium">{pos.symbol}</TableCell>
-                      <TableCell className="text-right">{pos.quantity}</TableCell>
+                      <TableCell className="text-right">{pos.qty}</TableCell>
                       <TableCell
                         className={`text-right ${
-                          pos.unrealizedPnL >= 0 ? "text-green-500" : "text-red-500"
+                          parseFloat(pos.unrealized_pl) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatCurrency(pos.unrealizedPnL)}
+                        {formatCurrency(parseFloat(pos.unrealized_pl))}
                       </TableCell>
                     </TableRow>
                   ))}
