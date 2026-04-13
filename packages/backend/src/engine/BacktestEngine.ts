@@ -129,7 +129,7 @@ export class BacktestEngine {
         ]));
 
         // Check for signals for this symbol
-        const signal = signals.find(s => s.symbol === config.symbol);
+        const signal = signals.find((s: any) => s.symbol === config.symbol);
 
         // If signal fires and no position, ENTER
         if (signal && !position) {
