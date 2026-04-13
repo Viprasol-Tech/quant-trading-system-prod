@@ -12,8 +12,9 @@ RUN npm install --legacy-peer-deps
 COPY tsconfig.json ./
 COPY src ./src
 COPY public ./public
-COPY next.config.js ./
+COPY next.config.mjs ./
 COPY tailwind.config.ts ./
+COPY postcss.config.mjs ./
 
 # Build the application
 RUN npm run build
