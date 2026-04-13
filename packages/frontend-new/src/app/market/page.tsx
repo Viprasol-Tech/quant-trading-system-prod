@@ -112,19 +112,19 @@ export default function MarketDataPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">
-                      ${formatPrice(quote.bid)}
+                      ${formatPrice(quote.bid ?? 0)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">
-                      ${formatPrice(quote.ask)}
+                      ${formatPrice(quote.ask ?? 0)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      ${formatPrice(quote.high)}
+                      ${formatPrice(quote.high ?? 0)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      ${formatPrice(quote.low)}
+                      ${formatPrice(quote.low ?? 0)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">
-                      {formatVolume(quote.volume)}
+                      {formatVolume(quote.volume ?? 0)}
                     </TableCell>
                   </TableRow>
                 ))}
