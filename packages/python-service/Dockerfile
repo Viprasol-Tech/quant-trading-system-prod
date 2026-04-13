@@ -16,8 +16,8 @@ ENV PYTHONPATH=/app/src
 EXPOSE 6105
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:6105/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:6105/health')"
 
 # Run app
 CMD ["python", "src/app.py"]
