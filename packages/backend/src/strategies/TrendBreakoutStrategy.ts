@@ -19,11 +19,20 @@ export class TrendBreakoutStrategy extends BaseStrategy {
   description = 'Trades uptrends when price breaks above resistance with volume confirmation';
 
   // Configurable parameters
-  private minConfidence = parseInt(process.env.STRATEGY_1_MIN_CONFIDENCE || '60');
-  private rsiMin = parseInt(process.env.STRATEGY_1_RSI_MIN || '40');
-  private rsiMax = parseInt(process.env.STRATEGY_1_RSI_MAX || '70');
-  private rvolThreshold = parseFloat(process.env.STRATEGY_1_RVOL_THRESHOLD || '1.5');
-  private atrMultiplier = parseFloat(process.env.STRATEGY_1_ATR_MULTIPLIER || '2.5');
+  private minConfidence: number;
+  private rsiMin: number;
+  private rsiMax: number;
+  private rvolThreshold: number;
+  private atrMultiplier: number;
+
+  constructor(params?: Record<string, any>) {
+    super();
+    this.minConfidence = params?.minConfidence ?? parseInt(process.env.STRATEGY_1_MIN_CONFIDENCE || '60');
+    this.rsiMin = params?.rsiMin ?? parseInt(process.env.STRATEGY_1_RSI_MIN || '40');
+    this.rsiMax = params?.rsiMax ?? parseInt(process.env.STRATEGY_1_RSI_MAX || '70');
+    this.rvolThreshold = params?.rvolThreshold ?? parseFloat(process.env.STRATEGY_1_RVOL_THRESHOLD || '1.5');
+    this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_1_ATR_MULTIPLIER || '2.5');
+  }
 
   generateSignals(analysisResults: Map<string, any>): TradeSignal[] {
     const signals: TradeSignal[] = [];

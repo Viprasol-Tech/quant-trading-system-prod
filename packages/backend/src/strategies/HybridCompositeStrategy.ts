@@ -20,8 +20,14 @@ export class HybridCompositeStrategy extends BaseStrategy {
   name = 'Hybrid/Composite';
   description = 'Adaptive strategy using 6-factor weighted composite scoring';
 
-  private minCompositeScore = parseInt(process.env.STRATEGY_3_MIN_SCORE || '65');
-  private atrMultiplier = parseFloat(process.env.STRATEGY_3_ATR_MULTIPLIER || '2.5');
+  private minCompositeScore: number;
+  private atrMultiplier: number;
+
+  constructor(params?: Record<string, any>) {
+    super();
+    this.minCompositeScore = params?.minCompositeScore ?? parseInt(process.env.STRATEGY_3_MIN_SCORE || '65');
+    this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_3_ATR_MULTIPLIER || '2.5');
+  }
 
   generateSignals(analysisResults: Map<string, any>): TradeSignal[] {
     const signals: TradeSignal[] = [];

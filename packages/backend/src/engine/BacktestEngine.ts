@@ -12,6 +12,7 @@ export interface BacktestConfig {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   initialCapital: number;
+  parameters?: Record<string, any>;
 }
 
 export interface BacktestTrade {
@@ -58,19 +59,19 @@ export class BacktestEngine {
   /**
    * Map strategy ID to strategy instance
    */
-  private getStrategy(strategyId: string): any {
+  private getStrategy(strategyId: string, params?: Record<string, any>): any {
     const id = strategyId.toLowerCase();
 
     if (id.includes('trend') || id === 's1' || id === 'strategy-1-momentum') {
-      return new TrendBreakoutStrategy();
+      return new TrendBreakoutStrategy(params);
     }
 
     if (id.includes('pullback') || id.includes('reversion') || id === 's2' || id === 'strategy-2-mean-reversion') {
-      return new PullbackReversionStrategy();
+      return new PullbackReversionStrategy(params);
     }
 
     if (id.includes('hybrid') || id === 's3' || id === 'strategy-3-hybrid') {
-      return new HybridCompositeStrategy();
+      return new HybridCompositeStrategy(params);
     }
 
     throw new Error(`Unknown strategy: ${strategyId}`);
@@ -92,7 +93,7 @@ export class BacktestEngine {
     logger.info(`Fetched ${bars.length} bars for ${config.symbol}`);
 
     // Initialize tracking
-    const strategy = this.getStrategy(config.strategyId);
+    const strategy = this.getStrategy(config.strategyId, config.parameters);
     const trades: BacktestTrade[] = [];
     const equityCurve: Array<{ date: string; equity: number }> = [];
 

@@ -17,10 +17,18 @@ export class PullbackReversionStrategy extends BaseStrategy {
   name = 'Pullback/Reversion';
   description = 'Buys pullback to support in an uptrend with volume confirmation';
 
-  private minConfidence = parseInt(process.env.STRATEGY_2_MIN_CONFIDENCE || '55');
-  private rsiMin = parseInt(process.env.STRATEGY_2_RSI_MIN || '35');
-  private rsiMax = parseInt(process.env.STRATEGY_2_RSI_MAX || '50');
-  private atrMultiplier = parseFloat(process.env.STRATEGY_2_ATR_MULTIPLIER || '2.0');
+  private minConfidence: number;
+  private rsiMin: number;
+  private rsiMax: number;
+  private atrMultiplier: number;
+
+  constructor(params?: Record<string, any>) {
+    super();
+    this.minConfidence = params?.minConfidence ?? parseInt(process.env.STRATEGY_2_MIN_CONFIDENCE || '55');
+    this.rsiMin = params?.rsiMin ?? parseInt(process.env.STRATEGY_2_RSI_MIN || '35');
+    this.rsiMax = params?.rsiMax ?? parseInt(process.env.STRATEGY_2_RSI_MAX || '50');
+    this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_2_ATR_MULTIPLIER || '2.0');
+  }
 
   generateSignals(analysisResults: Map<string, any>): TradeSignal[] {
     const signals: TradeSignal[] = [];

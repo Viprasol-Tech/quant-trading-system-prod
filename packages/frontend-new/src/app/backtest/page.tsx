@@ -43,6 +43,9 @@ import {
   DollarSign,
   Target,
   AlertTriangle,
+  Settings,
+  Grid3x3,
+  CheckCircle2,
 } from "lucide-react";
 import {
   ChartTooltip,
@@ -50,71 +53,63 @@ import {
 } from "@/components/ui/chart";
 import { Area, AreaChart, XAxis, YAxis, ResponsiveContainer } from "recharts";
 
-// Available symbols for backtesting (using Polygon/Massive API)
-const SYMBOLS = [
-  "AAPL",
-  "MSFT",
-  "GOOGL",
-  "AMZN",
-  "NVDA",
-  "META",
-  "TSLA",
-  "SPY",
-  "QQQ",
-  "IWM",
-  "GLD",
-  "SLV",
-  "TLT",
-  "XLF",
-  "XLE",
-  "XLK",
-  "XLV",
-  "VXX",
-  "EURUSD",
-  "GBPUSD",
-  "USDJPY",
-  "BTCUSD",
-  "ETHUSD",
-];
+// Symbol categories
+const SYMBOL_CATEGORIES = {
+  "US Large Cap": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"],
+  "Market ETFs": ["SPY", "QQQ", "IWM"],
+  "Sector ETFs": ["XLF", "XLE", "XLK", "XLV"],
+  Commodities: ["GLD", "SLV"],
+  Bonds: ["TLT"],
+  Volatility: ["VXX"],
+  Forex: ["EURUSD", "GBPUSD", "USDJPY"],
+  Crypto: ["BTCUSD", "ETHUSD"],
+};
 
-// Strategy definitions
+const ALL_SYMBOLS = Object.values(SYMBOL_CATEGORIES).flat();
+
+// Real strategy parameters
+const DEFAULT_PARAMS = {
+  "strategy-1-momentum": {
+    minConfidence: 60,
+    rsiMin: 40,
+    rsiMax: 70,
+    rvolThreshold: 1.5,
+    atrMultiplier: 2.5,
+  },
+  "strategy-2-mean-reversion": {
+    minConfidence: 55,
+    rsiMin: 35,
+    rsiMax: 50,
+    atrMultiplier: 2.0,
+  },
+  "strategy-3-hybrid": {
+    minCompositeScore: 65,
+    atrMultiplier: 2.5,
+  },
+};
+
+// Strategy definitions with real parameters
 const STRATEGIES = [
   {
     id: "strategy-1-momentum",
-    name: "Strategy 1: Momentum",
-    description: "RSI + MACD momentum-based entries",
+    name: "Strategy 1: Trend Breakout",
+    description: "RSI + RVOL breakout detection",
     type: "momentum",
-    parameters: {
-      rsiPeriod: 14,
-      rsiOversold: 30,
-      rsiOverbought: 70,
-      macdFast: 12,
-      macdSlow: 26,
-      macdSignal: 9,
-    },
+    defaultParams: DEFAULT_PARAMS["strategy-1-momentum"],
   },
   {
     id: "strategy-2-mean-reversion",
-    name: "Strategy 2: Mean Reversion",
-    description: "Bollinger Bands mean reversion",
+    name: "Strategy 2: Pullback Reversion",
+    description: "RSI pullback mean reversion",
     type: "meanReversion",
-    parameters: {
-      bbPeriod: 20,
-      bbStdDev: 2,
-      rsiConfirm: true,
-      rsiPeriod: 14,
-    },
+    defaultParams: DEFAULT_PARAMS["strategy-2-mean-reversion"],
   },
   {
     id: "strategy-3-hybrid",
-    name: "Strategy 3: Hybrid",
+    name: "Strategy 3: Hybrid Composite",
     description: "Combined momentum + mean reversion",
     type: "hybrid",
-    parameters: {
-      momentumWeight: 0.6,
-      reversionWeight: 0.4,
-      confirmationRequired: true,
-    },
+    defaultParams: DEFAULT_PARAMS["strategy-3-hybrid"],
   },
 ];
 
@@ -139,7 +134,34 @@ function formatDate(date: string) {
   });
 }
 
+// Map snake_case API response to camelCase frontend types
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapHistoryRow(row: Record<string, any>): Partial<BacktestResult> {
+  return {
+    strategyId: row.strategy_id,
+    strategyName: row.strategy_name,
+    symbol: row.symbol,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    initialCapital: row.initial_capital,
+    finalCapital: row.final_capital,
+    totalReturn: row.total_return,
+    totalReturnPercent: row.total_return_pct,
+    maxDrawdown: row.max_drawdown,
+    sharpeRatio: row.sharpe_ratio,
+    winRate: row.win_rate,
+    totalTrades: row.total_trades,
+    profitFactor: row.profit_factor || 0,
+    equityCurve: row.equity_curve,
+    trades: row.trades,
+  };
+}
+
 export default function BacktestPage() {
+  // Tab state
+  const [activeTab, setActiveTab] = useState("run");
+
+  // Configuration state
   const [selectedStrategy, setSelectedStrategy] = useState<string>("");
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
   const [startDate, setStartDate] = useState<string>(
@@ -150,6 +172,11 @@ export default function BacktestPage() {
   );
   const [initialCapital, setInitialCapital] = useState<number>(100000);
   const [activeResult, setActiveResult] = useState<BacktestResult | null>(null);
+
+  // Strategy parameters state
+  const [strategyParams, setStrategyParams] = useState<
+    Record<string, Record<string, number>>
+  >(DEFAULT_PARAMS);
 
   const { data: strategies } = useStrategies();
   const { data: history, isLoading: historyLoading } = useBacktestHistory();
@@ -164,35 +191,72 @@ export default function BacktestPage() {
       startDate,
       endDate,
       initialCapital,
+      parameters: strategyParams[selectedStrategy],
     };
 
     runBacktest.mutate(config, {
       onSuccess: (result) => {
         setActiveResult(result);
+        setActiveTab("run");
+      },
+    });
+  };
+
+  const handleSelectAndApplyStrategy = (strategyId: string) => {
+    setSelectedStrategy(strategyId);
+    setActiveTab("run");
+  };
+
+  const handleSelectSymbol = (symbol: string) => {
+    setSelectedSymbol(symbol);
+  };
+
+  const handleResetStrategyParams = (strategyId: string) => {
+    setStrategyParams({
+      ...strategyParams,
+      [strategyId]: DEFAULT_PARAMS[strategyId as keyof typeof DEFAULT_PARAMS],
+    });
+  };
+
+  const handleUpdateStrategyParam = (
+    strategyId: string,
+    paramName: string,
+    value: number
+  ) => {
+    setStrategyParams({
+      ...strategyParams,
+      [strategyId]: {
+        ...strategyParams[strategyId],
+        [paramName]: value,
       },
     });
   };
 
   const allStrategies = strategies?.length ? strategies : STRATEGIES;
+  const mappedHistory = history?.map(mapHistoryRow) || [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Backtesting</h1>
         <p className="text-muted-foreground">
-          Test strategies against historical data (Polygon/Massive API)
+          Complete backtesting engine: configure strategies, select symbols, analyze results
         </p>
       </div>
 
-      <Tabs defaultValue="run" className="space-y-4">
-        <TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="run" className="flex items-center gap-2">
             <Play className="h-4 w-4" />
             Run Backtest
           </TabsTrigger>
-          <TabsTrigger value="strategies" className="flex items-center gap-2">
-            <Target className="h-4 w-4" />
-            Strategies
+          <TabsTrigger value="strategy-config" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            Strategy Config
+          </TabsTrigger>
+          <TabsTrigger value="symbols" className="flex items-center gap-2">
+            <Grid3x3 className="h-4 w-4" />
+            Symbols
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
@@ -200,7 +264,7 @@ export default function BacktestPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Run Backtest Tab */}
+        {/* Tab 1: Run Backtest */}
         <TabsContent value="run" className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-3">
             {/* Configuration Panel */}
@@ -239,7 +303,7 @@ export default function BacktestPage() {
                       <SelectValue placeholder="Select symbol" />
                     </SelectTrigger>
                     <SelectContent>
-                      {SYMBOLS.map((s) => (
+                      {ALL_SYMBOLS.map((s) => (
                         <SelectItem key={s} value={s}>
                           {s}
                         </SelectItem>
@@ -361,7 +425,7 @@ export default function BacktestPage() {
                           Win Rate
                         </div>
                         <div className="text-xl font-bold mt-1">
-                          {(activeResult.winRate * 100).toFixed(1)}%
+                          {(activeResult.winRate || 0).toFixed(1)}%
                         </div>
                         <div className="text-sm text-muted-foreground">
                           {activeResult.totalTrades} trades
@@ -519,17 +583,11 @@ export default function BacktestPage() {
           </div>
         </TabsContent>
 
-        {/* Strategies Tab */}
-        <TabsContent value="strategies" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {/* Tab 2: Strategy Config */}
+        <TabsContent value="strategy-config" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
             {STRATEGIES.map((strategy) => (
-              <Card
-                key={strategy.id}
-                className="cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => {
-                  setSelectedStrategy(strategy.id);
-                }}
-              >
+              <Card key={strategy.id}>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">{strategy.name}</CardTitle>
@@ -537,41 +595,126 @@ export default function BacktestPage() {
                   </div>
                   <CardDescription>{strategy.description}</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-sm space-y-1">
-                    <p className="font-medium text-muted-foreground">
-                      Parameters:
-                    </p>
-                    {Object.entries(strategy.parameters)
-                      .slice(0, 3)
-                      .map(([key, value]) => (
-                        <div
-                          key={key}
-                          className="flex justify-between text-muted-foreground"
-                        >
-                          <span>{key}:</span>
-                          <span>{String(value)}</span>
+                <CardContent className="space-y-4">
+                  {/* Parameter Inputs */}
+                  <div className="space-y-3">
+                    {Object.entries(strategy.defaultParams).map(
+                      ([paramName, defaultValue]) => (
+                        <div key={paramName}>
+                          <Label className="text-sm capitalize">
+                            {paramName.replace(/([A-Z])/g, " $1").toLowerCase()}
+                          </Label>
+                          <Input
+                            type="number"
+                            step={
+                              typeof defaultValue === "number" &&
+                              defaultValue < 10
+                                ? "0.1"
+                                : "1"
+                            }
+                            value={
+                              strategyParams[strategy.id]?.[paramName] ||
+                              defaultValue
+                            }
+                            onChange={(e) =>
+                              handleUpdateStrategyParam(
+                                strategy.id,
+                                paramName,
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="mt-1"
+                            placeholder={String(defaultValue)}
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Default: {defaultValue}
+                          </p>
                         </div>
-                      ))}
+                      )
+                    )}
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full mt-4"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedStrategy(strategy.id);
-                    }}
-                  >
-                    Select for Backtest
-                  </Button>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      className="flex-1"
+                      size="sm"
+                      onClick={() =>
+                        handleSelectAndApplyStrategy(strategy.id)
+                      }
+                    >
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Select & Apply
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        handleResetStrategyParams(strategy.id)
+                      }
+                    >
+                      Reset
+                    </Button>
+                  </div>
+
+                  {selectedStrategy === strategy.id && (
+                    <div className="text-xs text-green-600 bg-green-50 p-2 rounded">
+                      Selected for backtest
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
         </TabsContent>
 
-        {/* History Tab */}
+        {/* Tab 3: Symbols */}
+        <TabsContent value="symbols" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Symbol Selection</CardTitle>
+              <CardDescription>
+                Select a symbol for backtesting
+                {selectedSymbol && (
+                  <span className="ml-2 text-green-600">
+                    (Selected: {selectedSymbol})
+                  </span>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {Object.entries(SYMBOL_CATEGORIES).map(([category, symbols]) => (
+                <div key={category}>
+                  <h3 className="font-medium text-sm mb-3 text-muted-foreground">
+                    {category}
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {symbols.map((symbol) => (
+                      <button
+                        key={symbol}
+                        onClick={() => handleSelectSymbol(symbol)}
+                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          selectedSymbol === symbol
+                            ? "bg-primary text-primary-foreground border-2 border-green-500"
+                            : "bg-muted hover:bg-muted/80 border-2 border-transparent"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {selectedSymbol === symbol && (
+                            <CheckCircle2 className="h-4 w-4" />
+                          )}
+                          {symbol}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab 4: History */}
         <TabsContent value="history" className="space-y-4">
           <Card>
             <CardHeader>
@@ -585,7 +728,7 @@ export default function BacktestPage() {
                     <Skeleton key={i} className="h-16 w-full" />
                   ))}
                 </div>
-              ) : history?.length ? (
+              ) : mappedHistory?.length ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -599,36 +742,39 @@ export default function BacktestPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.map((result, i) => (
+                    {mappedHistory.map((result, i) => (
                       <TableRow key={i}>
                         <TableCell className="font-medium">
-                          {result.strategyName}
+                          {result.strategyName || "N/A"}
                         </TableCell>
                         <TableCell>{result.symbol}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {formatDate(result.startDate)} -{" "}
-                          {formatDate(result.endDate)}
+                          {formatDate(result.startDate || "")} -{" "}
+                          {formatDate(result.endDate || "")}
                         </TableCell>
                         <TableCell
                           className={`text-right ${
-                            result.totalReturnPercent >= 0
+                            (result.totalReturnPercent || 0) >= 0
                               ? "text-green-500"
                               : "text-red-500"
                           }`}
                         >
-                          {formatPercent(result.totalReturnPercent)}
+                          {formatPercent(result.totalReturnPercent || 0)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {(result.winRate * 100).toFixed(1)}%
+                          {(result.winRate || 0).toFixed(1)}%
                         </TableCell>
                         <TableCell className="text-right">
-                          {result.sharpeRatio.toFixed(2)}
+                          {(result.sharpeRatio || 0).toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setActiveResult(result)}
+                            onClick={() => {
+                              setActiveResult(result as BacktestResult);
+                              setActiveTab("run");
+                            }}
                           >
                             View
                           </Button>
