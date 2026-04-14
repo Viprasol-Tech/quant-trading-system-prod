@@ -203,10 +203,6 @@ export default function BacktestPage() {
     setActiveTab("run");
   };
 
-  const handleSelectSymbol = (symbol: string) => {
-    setSelectedSymbol(symbol);
-  };
-
   const handleResetStrategyParams = (strategyId: string) => {
     setStrategyParams({
       ...strategyParams,
