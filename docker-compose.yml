@@ -69,10 +69,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ib-gateway:
-        condition: service_healthy
     networks:
       - trading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6105/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   # Fastify Backend
   backend:
