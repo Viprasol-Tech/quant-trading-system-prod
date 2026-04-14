@@ -656,7 +656,6 @@ export default function BacktestPage() {
                         handleSelectAndApplyStrategy(strategy.id)
                       }
                     >
-                      <CheckCircle2 className="mr-2 h-4 w-4" />
                       Select & Apply
                     </Button>
                     <Button
