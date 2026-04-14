@@ -17,7 +17,12 @@ export interface MassiveResponse {
 export declare class MassiveAPIClient {
     private client;
     private cache;
+    private readonly CACHE_TTL;
     constructor(apiKey?: string);
+    /**
+     * Clean up expired cache entries
+     */
+    private cleanupExpiredCache;
     /**
      * Fetch aggregated bars (OHLCV data)
      */
@@ -40,6 +45,7 @@ export declare class MassiveAPIClient {
     getLastTrade(ticker: string): Promise<number | null>;
     /**
      * Get quote for a ticker
+     * Note: /v1/last/quote may return 404 on free tier - fallback to daily bars instead
      */
     getQuote(ticker: string): Promise<{
         bid: number;
@@ -52,9 +58,20 @@ export declare class MassiveAPIClient {
      */
     clearCache(ticker?: string): void;
     /**
-     * Get cache size
+     * Get cache size and statistics
      */
     getCacheSize(): number;
+    /**
+     * Get detailed cache statistics
+     */
+    getCacheStats(): {
+        size: number;
+        entries: Array<{
+            key: string;
+            ageMs: number;
+            ageDays: string;
+        }>;
+    };
     /**
      * Test connection
      */

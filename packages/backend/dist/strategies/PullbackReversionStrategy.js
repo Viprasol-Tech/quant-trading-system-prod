@@ -18,14 +18,14 @@ const logger_1 = require("../config/logger");
  * 5. MACD showing reversal signs
  */
 class PullbackReversionStrategy extends BaseStrategy_1.BaseStrategy {
-    constructor() {
-        super(...arguments);
+    constructor(params) {
+        super();
         this.name = 'Pullback/Reversion';
         this.description = 'Buys pullback to support in an uptrend with volume confirmation';
-        this.minConfidence = parseInt(process.env.STRATEGY_2_MIN_CONFIDENCE || '55');
-        this.rsiMin = parseInt(process.env.STRATEGY_2_RSI_MIN || '35');
-        this.rsiMax = parseInt(process.env.STRATEGY_2_RSI_MAX || '50');
-        this.atrMultiplier = parseFloat(process.env.STRATEGY_2_ATR_MULTIPLIER || '2.0');
+        this.minConfidence = params?.minConfidence ?? parseInt(process.env.STRATEGY_2_MIN_CONFIDENCE || '55');
+        this.rsiMin = params?.rsiMin ?? parseInt(process.env.STRATEGY_2_RSI_MIN || '35');
+        this.rsiMax = params?.rsiMax ?? parseInt(process.env.STRATEGY_2_RSI_MAX || '50');
+        this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_2_ATR_MULTIPLIER || '2.0');
     }
     generateSignals(analysisResults) {
         const signals = [];

@@ -17,6 +17,7 @@ export declare class PullbackReversionStrategy extends BaseStrategy {
     private rsiMin;
     private rsiMax;
     private atrMultiplier;
+    constructor(params?: Record<string, any>);
     generateSignals(analysisResults: Map<string, any>): TradeSignal[];
     private checkNearFibSupport;
     private checkNearSRSupport;

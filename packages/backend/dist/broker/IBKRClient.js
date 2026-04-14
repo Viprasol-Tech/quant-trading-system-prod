@@ -1,4 +1,11 @@
 "use strict";
+/**
+ * @deprecated DO NOT USE
+ * This file contains MOCK/FAKE implementations only.
+ * Use PythonServiceClient (../../services/PythonServiceClient) for all IBKR data.
+ * This file is kept only to avoid breaking TypeScript compilation.
+ * It will be removed in a future cleanup.
+ */
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -9,6 +16,9 @@ const logger_1 = require("../config/logger");
 const environment_1 = require("../config/environment");
 const axios_1 = __importDefault(require("axios"));
 /**
+ * @deprecated DO NOT USE - Contains mock implementations only
+ * Use PythonServiceClient instead for all IBKR integration
+ *
  * IBKR Gateway Client
  * Connects to IBKR Gateway via socket and provides REST-like interface
  *

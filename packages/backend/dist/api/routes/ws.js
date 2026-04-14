@@ -1,28 +1,24 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.wsRoutes = wsRoutes;
 const logger_1 = require("../../config/logger");
 const wsManager_1 = require("../../services/wsManager");
-const IBKRClient_1 = __importDefault(require("../../broker/IBKRClient"));
+const PythonServiceClient_1 = require("../../services/PythonServiceClient");
 async function getSnapshotData() {
     try {
-        const broker = IBKRClient_1.default;
-        const account = await broker.getAccount();
-        const positions = await broker.getPositions();
-        const orders = await broker.getOrders({});
+        const account = await PythonServiceClient_1.pythonService.getAccountSummary();
+        const positions = await PythonServiceClient_1.pythonService.getPositions();
+        const orders = await PythonServiceClient_1.pythonService.getOrders();
         return {
             type: 'portfolio_update',
             timestamp: new Date().toISOString(),
             data: {
                 portfolio: {
-                    totalEquity: account.equity?.toString() || '0',
-                    cash: account.cash?.toString() || '0',
-                    buyingPower: account.buying_power?.toString() || '0',
-                    dayPnL: account.day_trading_buying_power?.toString() || '0',
-                    unrealizedPnL: account.gross_position_value?.toString() || '0'
+                    totalEquity: account?.net_liquidation || '0',
+                    cash: account?.total_cash || '0',
+                    buyingPower: account?.buying_power || '0',
+                    dayPnL: '0', // Python service doesn't provide day PnL yet
+                    unrealizedPnL: account?.gross_position_value || '0'
                 },
                 positions: positions.map((pos) => ({
                     symbol: pos.symbol,
@@ -30,8 +26,8 @@ async function getSnapshotData() {
                     avg_entry_price: pos.avg_entry_price?.toString(),
                     current_price: pos.current_price?.toString(),
                     market_value: pos.market_value?.toString() || '0',
-                    unrealized_pl: pos.unrealized_gain?.toString() || '0',
-                    unrealized_plpc: pos.unrealized_gain_pct?.toString() || '0'
+                    unrealized_pl: pos.unrealized_pl?.toString() || '0',
+                    unrealized_plpc: pos.unrealized_plpc?.toString() || '0'
                 })),
                 orders: orders.map((order) => ({
                     id: order.order_id,

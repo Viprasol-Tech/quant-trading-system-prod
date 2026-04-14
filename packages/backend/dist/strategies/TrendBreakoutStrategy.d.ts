@@ -19,6 +19,7 @@ export declare class TrendBreakoutStrategy extends BaseStrategy {
     private rsiMax;
     private rvolThreshold;
     private atrMultiplier;
+    constructor(params?: Record<string, any>);
     generateSignals(analysisResults: Map<string, any>): TradeSignal[];
     private checkMAAlignment;
     private checkBreakoutSignal;

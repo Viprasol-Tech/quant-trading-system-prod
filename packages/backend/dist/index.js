@@ -11,6 +11,7 @@ const logger_1 = require("./config/logger");
 const environment_1 = require("./config/environment");
 const routes_1 = require("./api/routes");
 const errorHandler_1 = require("./api/middleware/errorHandler");
+logger_1.logger.info(`Database initialized: ${process.env.DB_PATH || './data/trading.db'}`);
 const app = (0, fastify_1.default)({
     logger: true,
     requestTimeout: 30000

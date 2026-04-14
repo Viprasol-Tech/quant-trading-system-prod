@@ -19,16 +19,15 @@ const logger_1 = require("../config/logger");
  * 6. Market regime = 'bull'
  */
 class TrendBreakoutStrategy extends BaseStrategy_1.BaseStrategy {
-    constructor() {
-        super(...arguments);
+    constructor(params) {
+        super();
         this.name = 'Trend/Breakout';
         this.description = 'Trades uptrends when price breaks above resistance with volume confirmation';
-        // Configurable parameters
-        this.minConfidence = parseInt(process.env.STRATEGY_1_MIN_CONFIDENCE || '60');
-        this.rsiMin = parseInt(process.env.STRATEGY_1_RSI_MIN || '40');
-        this.rsiMax = parseInt(process.env.STRATEGY_1_RSI_MAX || '70');
-        this.rvolThreshold = parseFloat(process.env.STRATEGY_1_RVOL_THRESHOLD || '1.5');
-        this.atrMultiplier = parseFloat(process.env.STRATEGY_1_ATR_MULTIPLIER || '2.5');
+        this.minConfidence = params?.minConfidence ?? parseInt(process.env.STRATEGY_1_MIN_CONFIDENCE || '60');
+        this.rsiMin = params?.rsiMin ?? parseInt(process.env.STRATEGY_1_RSI_MIN || '40');
+        this.rsiMax = params?.rsiMax ?? parseInt(process.env.STRATEGY_1_RSI_MAX || '70');
+        this.rvolThreshold = params?.rvolThreshold ?? parseFloat(process.env.STRATEGY_1_RVOL_THRESHOLD || '1.5');
+        this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_1_ATR_MULTIPLIER || '2.5');
     }
     generateSignals(analysisResults) {
         const signals = [];

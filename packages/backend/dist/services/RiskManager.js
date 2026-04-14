@@ -7,6 +7,7 @@ exports.RiskManager = void 0;
 const decimal_js_1 = __importDefault(require("decimal.js"));
 const environment_1 = require("../config/environment");
 const logger_1 = require("../config/logger");
+const db_1 = __importDefault(require("../database/db"));
 class RiskManager {
     constructor() {
         this.peakEquity = new decimal_js_1.default(0);
@@ -21,6 +22,47 @@ class RiskManager {
         this.drawdownRed = new decimal_js_1.default(process.env.DRAWDOWN_RED_PERCENT || 0.15);
         this.drawdownHalt = new decimal_js_1.default(process.env.DRAWDOWN_HALT_PERCENT || 0.20);
         logger_1.logger.info('RiskManager initialized with environment parameters');
+        // Load peak_equity from database
+        this.loadPeakEquity();
+    }
+    /**
+     * Load peak_equity from database (called on startup)
+     */
+    loadPeakEquity() {
+        try {
+            const stmt = db_1.default.prepare('SELECT value FROM system_state WHERE key = ?');
+            const row = stmt.get('peak_equity');
+            if (row && row.value) {
+                this.peakEquity = new decimal_js_1.default(row.value);
+                logger_1.logger.info(`Loaded peak_equity from database: ${this.peakEquity}`);
+            }
+            else {
+                logger_1.logger.info('No peak_equity found in database, starting fresh');
+            }
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to load peak_equity from database:', error);
+            // Continue with default value
+        }
+    }
+    /**
+     * Save peak_equity to database
+     */
+    savePeakEquity() {
+        try {
+            const stmt = db_1.default.prepare(`
+        INSERT INTO system_state (key, value, updated_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = datetime('now')
+      `);
+            stmt.run('peak_equity', this.peakEquity.toString());
+        }
+        catch (error) {
+            logger_1.logger.warn('Failed to save peak_equity to database:', error);
+            // Continue anyway - don't let DB failure stop trading
+        }
     }
     /**
      * Calculate position size based on risk per trade
@@ -110,6 +152,8 @@ class RiskManager {
     updateDrawdown(currentEquity) {
         if (currentEquity.greaterThan(this.peakEquity)) {
             this.peakEquity = currentEquity;
+            // Save new peak equity to database
+            this.savePeakEquity();
         }
         this.currentDrawdown = this.peakEquity
             .minus(currentEquity)

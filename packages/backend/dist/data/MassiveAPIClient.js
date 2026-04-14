@@ -10,6 +10,7 @@ const environment_1 = require("../config/environment");
 class MassiveAPIClient {
     constructor(apiKey = environment_1.config.massive.apiKey) {
         this.cache = new Map();
+        this.CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.client = axios_1.default.create({
             baseURL: 'https://api.polygon.io',
             params: {
@@ -25,16 +26,43 @@ class MassiveAPIClient {
             });
             throw error;
         });
+        // Periodic cache cleanup every 6 hours
+        setInterval(() => this.cleanupExpiredCache(), 6 * 60 * 60 * 1000);
+    }
+    /**
+     * Clean up expired cache entries
+     */
+    cleanupExpiredCache() {
+        const now = Date.now();
+        let deletedCount = 0;
+        for (const [key, value] of this.cache.entries()) {
+            if (now - value.timestamp > this.CACHE_TTL) {
+                this.cache.delete(key);
+                deletedCount++;
+            }
+        }
+        if (deletedCount > 0) {
+            logger_1.logger.debug(`Cache cleanup: removed ${deletedCount} expired entries`);
+        }
     }
     /**
      * Fetch aggregated bars (OHLCV data)
      */
     async getAggregates(ticker, multiplier = 1, timespan = 'day', from, to) {
         const cacheKey = `${ticker}-${multiplier}-${timespan}-${from}-${to}`;
-        // Check cache
+        // Check cache (and validate TTL)
         if (this.cache.has(cacheKey)) {
-            logger_1.logger.debug(`Cache hit for ${cacheKey}`);
-            return this.cache.get(cacheKey);
+            const cached = this.cache.get(cacheKey);
+            const age = Date.now() - cached.timestamp;
+            if (age < this.CACHE_TTL) {
+                logger_1.logger.debug(`Cache hit for ${cacheKey} (age: ${(age / 1000).toFixed(0)}s)`);
+                return cached.data;
+            }
+            else {
+                // Expired, remove from cache
+                this.cache.delete(cacheKey);
+                logger_1.logger.debug(`Cache expired for ${cacheKey}`);
+            }
         }
         try {
             logger_1.logger.info(`Fetching ${ticker} ${multiplier}${timespan} bars from ${from} to ${to}`);
@@ -44,8 +72,10 @@ class MassiveAPIClient {
                     limit: 50000
                 }
             });
-            if (response.data.status !== 'OK' || !response.data.results) {
-                logger_1.logger.warn(`No data returned for ${ticker}`);
+            // Accept both OK and DELAYED statuses - DELAYED means data is 15 minutes delayed but still valid
+            const validStatuses = ['OK', 'DELAYED'];
+            if (!validStatuses.includes(response.data.status) || !response.data.results) {
+                logger_1.logger.warn(`No data returned for ${ticker} (status: ${response.data.status})`);
                 return [];
             }
             const ohlcv = response.data.results.map((bar) => ({
@@ -56,8 +86,8 @@ class MassiveAPIClient {
                 close: bar.c,
                 volume: bar.v
             }));
-            // Cache result
-            this.cache.set(cacheKey, ohlcv);
+            // Cache result with timestamp
+            this.cache.set(cacheKey, { data: ohlcv, timestamp: Date.now() });
             logger_1.logger.info(`Retrieved ${ohlcv.length} bars for ${ticker}`);
             return ohlcv;
         }
@@ -129,11 +159,14 @@ class MassiveAPIClient {
     }
     /**
      * Get quote for a ticker
+     * Note: /v1/last/quote may return 404 on free tier - fallback to daily bars instead
      */
     async getQuote(ticker) {
         try {
             const response = await this.client.get(`/v1/last/quote/${ticker}`);
-            if (response.data.status === 'OK' && response.data.last) {
+            // Accept both OK and DELAYED statuses
+            const validStatuses = ['OK', 'DELAYED'];
+            if (validStatuses.includes(response.data.status) && response.data.last) {
                 const { bid, ask } = response.data.last;
                 return {
                     bid,
@@ -145,7 +178,13 @@ class MassiveAPIClient {
             return null;
         }
         catch (error) {
-            logger_1.logger.error(`Failed to get quote for ${ticker}:`, error);
+            // /v1/last/quote returns 404 on free tier - this is expected
+            if (error.response?.status === 404) {
+                logger_1.logger.debug(`Quote endpoint not available for ${ticker} (free tier limitation)`);
+            }
+            else {
+                logger_1.logger.error(`Failed to get quote for ${ticker}:`, error.message);
+            }
             return null;
         }
     }
@@ -164,10 +203,29 @@ class MassiveAPIClient {
         }
     }
     /**
-     * Get cache size
+     * Get cache size and statistics
      */
     getCacheSize() {
+        // Clean up expired entries first
+        this.cleanupExpiredCache();
         return this.cache.size;
+    }
+    /**
+     * Get detailed cache statistics
+     */
+    getCacheStats() {
+        const now = Date.now();
+        const entries = Array.from(this.cache.entries())
+            .map(([key, value]) => ({
+            key,
+            ageMs: now - value.timestamp,
+            ageDays: ((now - value.timestamp) / (24 * 60 * 60 * 1000)).toFixed(1)
+        }))
+            .sort((a, b) => b.ageMs - a.ageMs);
+        return {
+            size: this.cache.size,
+            entries
+        };
     }
     /**
      * Test connection

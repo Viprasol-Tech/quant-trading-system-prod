@@ -15,6 +15,7 @@ const risk_1 = require("./risk");
 const compliance_1 = require("./compliance");
 const ws_1 = require("./ws");
 const system_1 = require("./system");
+const backtest_1 = require("./backtest");
 async function setupRoutes(app) {
     logger_1.logger.info('Setting up API routes...');
     try {
@@ -43,6 +44,9 @@ async function setupRoutes(app) {
         // Register WebSocket routes
         await app.register(ws_1.wsRoutes);
         logger_1.logger.info('✓ WebSocket routes registered');
+        // Register Backtest routes (Phase 4)
+        await app.register(backtest_1.backtestRoutes);
+        logger_1.logger.info('✓ Backtest routes registered');
         logger_1.logger.info('All routes registered successfully');
     }
     catch (error) {

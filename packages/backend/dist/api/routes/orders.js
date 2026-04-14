@@ -3,7 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ordersRoutes = ordersRoutes;
 const logger_1 = require("../../config/logger");
 const PythonServiceClient_1 = require("../../services/PythonServiceClient");
+const ShariahScreener_1 = require("../../shariah/ShariahScreener");
 async function ordersRoutes(app) {
+    const screener = new ShariahScreener_1.ShariahScreener();
     /**
      * GET /api/orders - Get all orders - REAL DATA from IBKR
      */
@@ -147,6 +149,18 @@ async function ordersRoutes(app) {
                     error: {
                         code: 'INVALID_ORDER',
                         message: 'Limit price required for LMT orders'
+                    }
+                });
+            }
+            // Check Shariah compliance BEFORE submitting order
+            if (screener.isProhibitedCompany(symbol.toUpperCase())) {
+                logger_1.logger.warn(`Order rejected: ${symbol} is Shariah non-compliant`);
+                return reply.status(403).send({
+                    success: false,
+                    error: {
+                        code: 'SHARIAH_NON_COMPLIANT',
+                        message: `Symbol ${symbol.toUpperCase()} is not Shariah-compliant and cannot be traded`,
+                        symbol: symbol.toUpperCase()
                     }
                 });
             }

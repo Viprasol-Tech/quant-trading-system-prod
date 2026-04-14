@@ -44,8 +44,6 @@ import {
   Target,
   AlertTriangle,
   Settings,
-  Grid3x3,
-  CheckCircle2,
 } from "lucide-react";
 import {
   ChartTooltip,
@@ -53,19 +51,17 @@ import {
 } from "@/components/ui/chart";
 import { Area, AreaChart, XAxis, YAxis, ResponsiveContainer } from "recharts";
 
-// Symbol categories
-const SYMBOL_CATEGORIES = {
-  "US Large Cap": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"],
-  "Market ETFs": ["SPY", "QQQ", "IWM"],
-  "Sector ETFs": ["XLF", "XLE", "XLK", "XLV"],
-  Commodities: ["GLD", "SLV"],
-  Bonds: ["TLT"],
-  Volatility: ["VXX"],
-  Forex: ["EURUSD", "GBPUSD", "USDJPY"],
-  Crypto: ["BTCUSD", "ETHUSD"],
-};
-
-const ALL_SYMBOLS = Object.values(SYMBOL_CATEGORIES).flat();
+// All available symbols for backtesting
+const ALL_SYMBOLS = [
+  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+  "SPY", "QQQ", "IWM",
+  "XLF", "XLE", "XLK", "XLV",
+  "GLD", "SLV",
+  "TLT",
+  "VXX",
+  "EURUSD", "GBPUSD", "USDJPY",
+  "BTCUSD", "ETHUSD",
+];
 
 // Real strategy parameters
 const DEFAULT_PARAMS = {
@@ -244,25 +240,32 @@ export default function BacktestPage() {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="run" className="flex items-center gap-2">
-            <Play className="h-4 w-4" />
-            Run Backtest
-          </TabsTrigger>
-          <TabsTrigger value="strategy-config" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            Strategy Config
-          </TabsTrigger>
-          <TabsTrigger value="symbols" className="flex items-center gap-2">
-            <Grid3x3 className="h-4 w-4" />
-            Symbols
-          </TabsTrigger>
-          <TabsTrigger value="history" className="flex items-center gap-2">
-            <History className="h-4 w-4" />
-            History
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-0">
+        <div className="border-b mb-6">
+          <TabsList className="flex w-full h-auto bg-transparent p-0 rounded-none gap-0">
+            <TabsTrigger
+              value="run"
+              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Play className="h-4 w-4" />
+              Run Backtest
+            </TabsTrigger>
+            <TabsTrigger
+              value="strategy-config"
+              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Settings className="h-4 w-4" />
+              Strategy Config
+            </TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <History className="h-4 w-4" />
+              History
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Tab 1: Run Backtest */}
         <TabsContent value="run" className="space-y-4">
@@ -570,12 +573,22 @@ export default function BacktestPage() {
                     )}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="font-medium">No Results Yet</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Configure and run a backtest to see performance metrics
-                    </p>
+                  <div className="flex flex-col items-center justify-center h-[380px] text-center gap-4">
+                    <BarChart3 className="h-14 w-14 text-muted-foreground/30" />
+                    <div>
+                      <h3 className="text-base font-semibold">No Results Yet</h3>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                        Configure a strategy and run a backtest to see results here.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 w-full max-w-xs mt-2">
+                      {["Total Return", "Win Rate", "Sharpe Ratio", "Max Drawdown"].map((label) => (
+                        <div key={label} className="border rounded-lg p-3 text-left opacity-30">
+                          <div className="text-xs text-muted-foreground">{label}</div>
+                          <div className="h-5 w-14 bg-muted rounded mt-1.5" />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -668,53 +681,7 @@ export default function BacktestPage() {
           </div>
         </TabsContent>
 
-        {/* Tab 3: Symbols */}
-        <TabsContent value="symbols" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Symbol Selection</CardTitle>
-              <CardDescription>
-                Select a symbol for backtesting
-                {selectedSymbol && (
-                  <span className="ml-2 text-green-600">
-                    (Selected: {selectedSymbol})
-                  </span>
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {Object.entries(SYMBOL_CATEGORIES).map(([category, symbols]) => (
-                <div key={category}>
-                  <h3 className="font-medium text-sm mb-3 text-muted-foreground">
-                    {category}
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {symbols.map((symbol) => (
-                      <button
-                        key={symbol}
-                        onClick={() => handleSelectSymbol(symbol)}
-                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                          selectedSymbol === symbol
-                            ? "bg-primary text-primary-foreground border-2 border-green-500"
-                            : "bg-muted hover:bg-muted/80 border-2 border-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          {selectedSymbol === symbol && (
-                            <CheckCircle2 className="h-4 w-4" />
-                          )}
-                          {symbol}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Tab 4: History */}
+        {/* Tab 3: History */}
         <TabsContent value="history" className="space-y-4">
           <Card>
             <CardHeader>

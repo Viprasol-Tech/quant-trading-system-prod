@@ -1,4 +1,11 @@
 /**
+ * @deprecated DO NOT USE
+ * This file contains MOCK/FAKE implementations only.
+ * Use PythonServiceClient (../../services/PythonServiceClient) for all IBKR data.
+ * This file is kept only to avoid breaking TypeScript compilation.
+ * It will be removed in a future cleanup.
+ */
+/**
  * IBKR Account Information
  */
 export interface IBKRAccount {
@@ -69,6 +76,9 @@ export interface IBKROrder {
     transmit?: boolean;
 }
 /**
+ * @deprecated DO NOT USE - Contains mock implementations only
+ * Use PythonServiceClient instead for all IBKR integration
+ *
  * IBKR Gateway Client
  * Connects to IBKR Gateway via socket and provides REST-like interface
  *

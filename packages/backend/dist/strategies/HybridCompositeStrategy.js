@@ -21,12 +21,12 @@ const logger_1 = require("../config/logger");
  * Entry when: Composite score > 65 AND regime != 'bear'
  */
 class HybridCompositeStrategy extends BaseStrategy_1.BaseStrategy {
-    constructor() {
-        super(...arguments);
+    constructor(params) {
+        super();
         this.name = 'Hybrid/Composite';
         this.description = 'Adaptive strategy using 6-factor weighted composite scoring';
-        this.minCompositeScore = parseInt(process.env.STRATEGY_3_MIN_SCORE || '65');
-        this.atrMultiplier = parseFloat(process.env.STRATEGY_3_ATR_MULTIPLIER || '2.5');
+        this.minCompositeScore = params?.minCompositeScore ?? parseInt(process.env.STRATEGY_3_MIN_SCORE || '65');
+        this.atrMultiplier = params?.atrMultiplier ?? parseFloat(process.env.STRATEGY_3_ATR_MULTIPLIER || '2.5');
     }
     generateSignals(analysisResults) {
         const signals = [];

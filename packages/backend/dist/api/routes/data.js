@@ -4,6 +4,7 @@ exports.dataRoutes = dataRoutes;
 const logger_1 = require("../../config/logger");
 const MassiveAPIClient_1 = require("../../data/MassiveAPIClient");
 const DataPreprocessor_1 = require("../../data/DataPreprocessor");
+const PythonServiceClient_1 = require("../../services/PythonServiceClient");
 async function dataRoutes(app) {
     const massive = new MassiveAPIClient_1.MassiveAPIClient();
     /**
@@ -170,7 +171,162 @@ async function dataRoutes(app) {
         }
     });
     /**
-     * GET /api/data/quotes/:symbol - Get latest quote for symbol
+     * GET /api/data/quotes - Get latest LIVE quotes from IBKR Gateway
+     * Uses IBKR positions for live market data (not delayed Polygon.io)
+     */
+    app.get('/api/data/quotes', async (request, reply) => {
+        const startTime = Date.now();
+        try {
+            const { symbols: symbolsParam } = request.query;
+            // Validate input
+            if (!symbolsParam) {
+                return reply.status(400).send({
+                    success: false,
+                    error: 'symbols query parameter required (comma-separated, e.g., ?symbols=AAPL,MSFT)'
+                });
+            }
+            // Parse and validate symbols
+            const symbols = symbolsParam.split(',').map((s) => s.trim().toUpperCase());
+            // Rate limiting: max 20 symbols per request
+            if (symbols.length > 20) {
+                logger_1.logger.warn(`Bulk quotes request exceeds limit: ${symbols.length} symbols`);
+                return reply.status(429).send({
+                    success: false,
+                    error: `Maximum 20 symbols per request. Requested: ${symbols.length}`
+                });
+            }
+            // Validate symbol format
+            const invalidSymbols = symbols.filter((s) => !/^[A-Z0-9]{1,5}$/.test(s));
+            if (invalidSymbols.length > 0) {
+                logger_1.logger.warn(`Invalid symbols provided: ${invalidSymbols.join(', ')}`);
+                return reply.status(400).send({
+                    success: false,
+                    error: `Invalid symbols: ${invalidSymbols.join(', ')}`
+                });
+            }
+            logger_1.logger.info(`Bulk quotes request for ${symbols.length} symbols from IBKR: ${symbols.join(', ')}`);
+            // Get live positions from IBKR via Python service
+            let ibkrPositions = [];
+            let ibkrConnected = false;
+            try {
+                ibkrPositions = await PythonServiceClient_1.pythonService.getPositions();
+                ibkrConnected = ibkrPositions.length > 0 || await PythonServiceClient_1.pythonService.isConnected();
+                logger_1.logger.info(`IBKR: Retrieved ${ibkrPositions.length} live positions`);
+            }
+            catch (error) {
+                logger_1.logger.warn('IBKR: Failed to get positions, falling back to Polygon.io', error);
+                ibkrConnected = false;
+            }
+            // Create map of IBKR positions for quick lookup
+            const ibkrMap = new Map(ibkrPositions.map((pos) => [pos.symbol, pos]));
+            // Fetch quotes from available sources
+            const quotePromises = symbols.map((symbol) => Promise.race([
+                (async () => {
+                    try {
+                        // PRIMARY: Try to get live data from IBKR positions
+                        if (ibkrConnected && ibkrMap.has(symbol)) {
+                            const position = ibkrMap.get(symbol);
+                            const currentPrice = parseFloat(position.current_price || position.market_value);
+                            logger_1.logger.info(`IBKR LIVE: ${symbol} = $${currentPrice}`);
+                            return {
+                                symbol,
+                                bid: currentPrice,
+                                ask: currentPrice,
+                                last: currentPrice,
+                                volume: 0, // IBKR doesn't provide volume in positions
+                                high: currentPrice,
+                                low: currentPrice,
+                                open: currentPrice,
+                                close: currentPrice,
+                                change: 0,
+                                changePercent: 0,
+                                timestamp: new Date().toISOString(),
+                                source: 'IBKR'
+                            };
+                        }
+                        // FALLBACK: Use Polygon.io for symbols not in IBKR portfolio
+                        logger_1.logger.info(`Falling back to Polygon.io for ${symbol} (not in IBKR positions)`);
+                        const today = new Date();
+                        const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+                        const fromDate = thirtyDaysAgo.toISOString().split('T')[0];
+                        const toDate = today.toISOString().split('T')[0];
+                        const quote = await massive.getQuote(symbol);
+                        const bars = await massive.getDailyBars(symbol, fromDate, toDate);
+                        if (!bars || bars.length === 0) {
+                            logger_1.logger.warn(`No Polygon data available for ${symbol}`);
+                            return { symbol, error: 'No data available' };
+                        }
+                        const latestBar = bars[bars.length - 1];
+                        const previousBar = bars.length > 1 ? bars[bars.length - 2] : null;
+                        const change = latestBar.close - (previousBar?.close || latestBar.open);
+                        const changePercent = previousBar
+                            ? (change / previousBar.close) * 100
+                            : (change / latestBar.open) * 100;
+                        return {
+                            symbol,
+                            bid: quote?.bid || latestBar.close,
+                            ask: quote?.ask || latestBar.close,
+                            last: quote?.mid || latestBar.close,
+                            volume: latestBar.volume,
+                            high: latestBar.high,
+                            low: latestBar.low,
+                            open: latestBar.open,
+                            close: latestBar.close,
+                            change: parseFloat(change.toFixed(2)),
+                            changePercent: parseFloat(changePercent.toFixed(2)),
+                            timestamp: new Date(latestBar.timestamp).toISOString(),
+                            source: 'POLYGON'
+                        };
+                    }
+                    catch (error) {
+                        logger_1.logger.error(`Failed to fetch quote for ${symbol}:`, error);
+                        return { symbol, error: error instanceof Error ? error.message : 'Unknown error' };
+                    }
+                })(),
+                new Promise((resolve) => setTimeout(() => resolve({ symbol, error: 'Request timeout' }), 5000))
+            ]));
+            const results = await Promise.all(quotePromises);
+            const endTime = Date.now();
+            const successfulQuotes = results.filter((r) => !r.error);
+            const failedQuotes = results.filter((r) => r.error);
+            const ibkrQuotes = successfulQuotes.filter((r) => r.source === 'IBKR');
+            const polygonQuotes = successfulQuotes.filter((r) => r.source === 'POLYGON');
+            logger_1.logger.info(`Bulk quotes completed in ${endTime - startTime}ms`, {
+                requested: symbols.length,
+                successful: successfulQuotes.length,
+                fromIBKR: ibkrQuotes.length,
+                fromPolygon: polygonQuotes.length,
+                failed: failedQuotes.length
+            });
+            if (failedQuotes.length > 0) {
+                logger_1.logger.warn(`Failed to fetch quotes for: ${failedQuotes.map((q) => q.symbol).join(', ')}`);
+            }
+            if (successfulQuotes.length === 0) {
+                return reply.status(503).send({
+                    success: false,
+                    error: `Failed to fetch quotes for all symbols: ${failedQuotes
+                        .map((q) => `${q.symbol}(${q.error})`)
+                        .join(', ')}`
+                });
+            }
+            reply.send({
+                success: true,
+                data: successfulQuotes,
+                count: successfulQuotes.length,
+                source: `${ibkrQuotes.length} from IBKR LIVE, ${polygonQuotes.length} from Polygon`,
+                error: failedQuotes.length > 0 ? `${failedQuotes.length} symbols failed` : undefined
+            });
+        }
+        catch (error) {
+            logger_1.logger.error('Bulk quotes fetch failed:', error);
+            reply.status(500).send({
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
+    /**
+     * GET /api/data/quotes/:symbol - Get latest quote for single symbol
      */
     app.get('/api/data/quotes/:symbol', async (request, reply) => {
         try {

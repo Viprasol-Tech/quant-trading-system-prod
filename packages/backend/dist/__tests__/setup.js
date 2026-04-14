@@ -1,4 +1,6 @@
 "use strict";
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/// <reference types="jest" />
 // Jest setup file
 // Global test configuration and setup
 // Suppress console logs during tests unless explicitly needed

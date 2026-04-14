@@ -18,6 +18,7 @@ export declare class HybridCompositeStrategy extends BaseStrategy {
     description: string;
     private minCompositeScore;
     private atrMultiplier;
+    constructor(params?: Record<string, any>);
     generateSignals(analysisResults: Map<string, any>): TradeSignal[];
     private calculateTrendScore;
     private calculateMomentumScore;

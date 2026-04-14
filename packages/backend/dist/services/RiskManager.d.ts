@@ -13,6 +13,14 @@ export declare class RiskManager {
     private drawdownHalt;
     constructor();
     /**
+     * Load peak_equity from database (called on startup)
+     */
+    private loadPeakEquity;
+    /**
+     * Save peak_equity to database
+     */
+    private savePeakEquity;
+    /**
      * Calculate position size based on risk per trade
      */
     calculatePositionSize(equity: Decimal, riskPercent: number, entryPrice: Decimal, stopPrice: Decimal): number;
